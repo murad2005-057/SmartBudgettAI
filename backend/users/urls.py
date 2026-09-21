@@ -3,8 +3,10 @@ from .views import (
     RegisterView, UpdateSalaryView, UpdateExtraIncomeView, UpdateHousingView,
     UpdateHasCreditView, CreditListCreateView, CreditDetailView,
     UpdateSavingsGoalsView, UpdateMonthlyExpensesView, UpdateRecurringExpensesView,
-    UpdateFinancialAssessmentView, UpdateMonthlySavingsAbilityView,
+    UpdateFinancialAssessmentView, UpdateMonthlySavingsAbilityView, ExportPDFAPIView,
     CompleteOnboardingView, FinancialInquiryStatusView, RetryPlanGenerationView,
+    FinancialSummaryAPIView, SavingsGoalsProgressAPIView, MonthlyBudgetTableAPIView,
+    BudgetComparisonAPIView, RecalculateBudgetAPIView,  ExportExcelAPIView,
 )
 
 urlpatterns = [
@@ -23,4 +25,11 @@ urlpatterns = [
     path('financial-inquiry/complete/', CompleteOnboardingView.as_view(), name='complete-onboarding'),
     path('financial-inquiry/status/', FinancialInquiryStatusView.as_view(), name='inquiry-status'),
     path('financial-inquiry/retry/', RetryPlanGenerationView.as_view(), name='retry-plan'),
+    path('summary/<int:session_id>/', FinancialSummaryAPIView.as_view(), name='financial-summary'),
+    path('summary/<int:session_id>/goals/', SavingsGoalsProgressAPIView.as_view(), name='savings-goals-progress'),
+    path('summary/<int:session_id>/table/', MonthlyBudgetTableAPIView.as_view(), name='monthly-budget-table'),
+    path('summary/<int:session_id>/comparison/', BudgetComparisonAPIView.as_view(), name='budget-comparison'),
+    path('summary/<int:session_id>/recalculate/', RecalculateBudgetAPIView.as_view(), name='budget-recalculate'),
+    path('summary/<int:session_id>/export/excel/', ExportExcelAPIView.as_view(), name='export-excel'),
+    path('summary/<int:session_id>/export/pdf/', ExportPDFAPIView.as_view(), name='export-pdf'),
 ]
