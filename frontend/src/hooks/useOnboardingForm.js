@@ -1,9 +1,22 @@
 import { useEffect, useState } from 'react'
-
 export const ONBOARDING_STORAGE_KEY = 'smartbudget-onboarding-state'
 export const ONBOARDING_ACTIVE_KEY = 'smartbudget-onboarding-active'
 export const ACCOUNT_STORAGE_KEY = 'smartbudget-account-state'
 export const BUDGET_MONTHS_STORAGE_KEY = 'smartbudget-budget-plan-months'
+
+import { 
+  updateSalary, 
+  updateExtraIncome, 
+  updateHousing, 
+  updateHasCredit, 
+  syncCredits, 
+  updateSavingsGoals, 
+  updateMonthlyExpenses, 
+  updateRecurringExpenses, 
+  updateFinancialAssessment,
+  updateMonthlySavingsAbility,
+  completeOnboarding
+} from '../services/api'
 
 const EMPTY_CREDIT = () => ({
   monthly: '',
@@ -96,7 +109,6 @@ export function useOnboardingForm(initialUserName = 'User') {
     setFormData(createInitialFormData())
   }
 
-  // ── Generic field update ─────────────────────────────────────────────────
   const updateField = (fieldName, value) => {
     setFormData((prev) => ({ ...prev, [fieldName]: value }))
   }
@@ -127,7 +139,6 @@ export function useOnboardingForm(initialUserName = 'User') {
     setFormData((prev) => ({ ...prev, [fieldName]: '' }))
   }
 
-  // ── Credits array helpers ────────────────────────────────────────────────
   const addCredit = () => {
     setFormData((prev) => ({
       ...prev,
@@ -155,7 +166,6 @@ export function useOnboardingForm(initialUserName = 'User') {
     }))
   }
 
-  // Renamed from updateSavingsGoals to avoid shadowing the imported API function
   const applySavingsGoals = (goals) => {
     const savingsGoal = goals.reduce((total, goal) => total + (Number(goal.amount) || 0), 0).toString()
     updateField('savingsGoals', goals)
@@ -178,11 +188,113 @@ export function useOnboardingForm(initialUserName = 'User') {
     applySavingsGoals(goals)
   }
 
-  // ── Navigation ───────────────────────────────────────────────────────────
   const nextStep = async () => {
     setStepError(null)
 
-    if (currentStep < totalSteps + 1) {
+    if (currentStep === 1) {
+      try {
+        await updateSalary(Number(formData.salary))
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 2) {
+      try {
+        const isYes = formData.hasExtraIncome === 'Bəli' || formData.hasExtraIncome === true
+        await updateExtraIncome({
+          hasExtraIncome: isYes,
+          extraIncome: isYes ? formData.extraIncome : 0
+        })
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 3) {
+      try {
+        await updateHousing({
+          housingType: formData.housingType,
+          housingAmount: formData.housingAmount
+        })
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 4) {
+      try {
+        await updateHasCredit(formData.hasCredit)
+
+        if (formData.hasCredit === 'Bəli') {
+          await syncCredits(formData.credits)
+        }
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 5) {
+      try {
+        await updateSavingsGoals(formData.savingsGoals)
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 6) {
+      try {
+        await updateMonthlyExpenses(formData.monthlyExpenses)
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 7) {
+      try {
+        await updateRecurringExpenses(formData.recurringExpenses)
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 8) {
+      try {
+        await updateFinancialAssessment(formData.financialAssessment)
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 9) {
+      try {
+        await updateMonthlySavingsAbility(formData.monthlySavingsAbility)
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep === 10) {
+      try {
+        await completeOnboarding(formData.annualBudgetPriority)
+        finishOnboarding()
+        return
+      } catch (err) {
+        setStepError(err.message)
+        return
+      }
+    }
+
+    if (currentStep < totalSteps) {
       setCurrentStep((prev) => prev + 1)
     }
   }
@@ -197,7 +309,6 @@ export function useOnboardingForm(initialUserName = 'User') {
     setCurrentStep(Math.min(totalSteps, Math.max(1, step)))
   }
 
-  // ── Per-step validation ──────────────────────────────────────────────────
   const isCreditRowValid = (c) =>
     c.monthly.trim() !== '' &&
     c.remaining.trim() !== '' &&
@@ -227,7 +338,7 @@ export function useOnboardingForm(initialUserName = 'User') {
         }
         return true
       case 5:
-        return formData.savingsGoals.length > 0 && formData.savingsGoals.some((goal) =>
+        return formData.savingsGoals.length > 0 && formData.savingsGoals.every((goal) =>
           goal.amount !== '' && !isNaN(Number(goal.amount)) &&
           (goal.id !== 'other' || (goal.customName && goal.customName.trim() !== ''))
         )

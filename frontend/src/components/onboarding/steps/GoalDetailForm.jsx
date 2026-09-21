@@ -13,15 +13,15 @@ export function GoalDetailForm({ goal, onPriorityChange, onAmountChange, onAmoun
       <h5 id={`goal-detail-${goal.id}`} className="goal-detail-title">{goal.label}</h5>
 
       {goal.id === 'other' && (
-        <CustomInput
-          id={`goal-custom-name-${goal.id}`}
-          label="Məqsədin adı"
-          value={goal.customName || ''}
-          onChange={onCustomNameChange}
-          onClear={() => onCustomNameChange('')}
-          placeholder="Məsələn: Yeni notbuk"
-          type="text"
-        />
+      <CustomInput
+        id={`goal-custom-name-${goal.id}`}
+        label="Məqsədin adı"
+        value={goal.customName || ''}
+        onChange={onCustomNameChange}
+        onClear={() => onCustomNameChange('')}
+        placeholder="Məsələn: Yeni notbuk"
+        type="text"
+      />
       )}
 
       <fieldset className="priority-fieldset">

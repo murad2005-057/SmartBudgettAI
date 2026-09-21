@@ -1,20 +1,17 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import FinancialInquirySession, FinancialInquirySession
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from .models import Credit, SavingsGoal
 
+from .models import FinancialInquirySession, Credit, SavingsGoal
 from .serializers import (
     RegisterSerializer, SalaryUpdateSerializer, ExtraIncomeUpdateSerializer,
     HousingUpdateSerializer, HasCreditSerializer, CreditSerializer,
     SavingsGoalsUpdateSerializer, MonthlyExpensesSerializer, RecurringExpensesSerializer,
-    FinancialAssessmentSerializer, ASSESSMENT_TEXT_TO_CODE,
-    
-    )
-
-
+    FinancialAssessmentSerializer, MonthlySavingsAbilitySerializer,
+    CompleteOnboardingSerializer, ASSESSMENT_TEXT_TO_CODE
+)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -41,7 +38,6 @@ class RegisterView(generics.CreateAPIView):
                 "refresh": str(refresh),
             }
         }, status=status.HTTP_201_CREATED)
-        
 
 
 class UpdateSalaryView(APIView):
@@ -60,8 +56,7 @@ class UpdateSalaryView(APIView):
             "message": "Aylıq əmək haqqı saxlanıldı.",
             "salary": str(session.salary)
         }, status=status.HTTP_200_OK)
-        
-        
+
 
 class UpdateExtraIncomeView(APIView):
     permission_classes = [IsAuthenticated]
@@ -81,8 +76,6 @@ class UpdateExtraIncomeView(APIView):
             "hasExtraIncome": session.has_extra_income,
             "extraIncome": str(session.extra_income) if session.extra_income else None
         }, status=status.HTTP_200_OK)
-        
-        
 
 
 class UpdateHousingView(APIView):
@@ -103,7 +96,6 @@ class UpdateHousingView(APIView):
             "housingType": session.housing_type,
             "housingAmount": str(session.housing_amount) if session.housing_amount else None
         }, status=status.HTTP_200_OK)
-        
 
 
 class UpdateHasCreditView(APIView):
@@ -172,8 +164,6 @@ class CreditDetailView(generics.RetrieveUpdateDestroyAPIView):
         instance = self.get_object()
         instance.delete()
         return Response({"success": True, "message": "Kredit silindi."}, status=status.HTTP_200_OK)
-    
-    
 
 
 class UpdateSavingsGoalsView(APIView):
@@ -184,7 +174,7 @@ class UpdateSavingsGoalsView(APIView):
         serializer.is_valid(raise_exception=True)
 
         session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
-        session.savings_goals.all().delete()  # replace entirely — deselected goal = removed
+        session.savings_goals.all().delete()
 
         for goal in serializer.validated_data['goals']:
             SavingsGoal.objects.create(
@@ -200,8 +190,7 @@ class UpdateSavingsGoalsView(APIView):
             "message": "Yığım məqsədləri saxlanıldı.",
             "count": session.savings_goals.count()
         }, status=status.HTTP_200_OK)
-        
-        
+
 
 class UpdateMonthlyExpensesView(APIView):
     permission_classes = [IsAuthenticated]
@@ -233,7 +222,6 @@ class UpdateMonthlyExpensesView(APIView):
             "message": "Aylıq xərclər saxlanıldı.",
             "totalMonthlyExpense": str(session.total_monthly_expense)
         }, status=status.HTTP_200_OK)
-        
 
 
 FIELD_MAP = {
@@ -268,8 +256,8 @@ class UpdateRecurringExpensesView(APIView):
             "message": "Mütəmadi xərclər saxlanıldı.",
             "recurringExpenses": list(selected)
         }, status=status.HTTP_200_OK)
-        
-        
+
+
 class UpdateFinancialAssessmentView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -286,3 +274,98 @@ class UpdateFinancialAssessmentView(APIView):
             "message": "Maliyyə davranışı saxlanıldı.",
             "financialAssessment": session.financial_assessment
         }, status=status.HTTP_200_OK)
+
+
+class UpdateMonthlySavingsAbilityView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request):
+        serializer = MonthlySavingsAbilitySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+        session.monthly_savings_ability = serializer.validated_data['monthly_savings_ability']
+        session.save()
+
+        return Response({
+            "success": True,
+            "message": "Aylıq yığım qabiliyyəti saxlanıldı.",
+            "monthlySavingsAbility": session.monthly_savings_ability
+        }, status=status.HTTP_200_OK)
+
+
+class CompleteOnboardingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CompleteOnboardingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+
+        if not session.salary or session.salary <= 0:
+            return Response(
+                {"error": "Əmək haqqı daxil edilməyib."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        session.annual_budget_priority = serializer.validated_data['annualBudgetPriority']
+        
+        # Shift status to 'processing' to trigger frontend loading/polling screen
+        session.status = 'processing'
+        session.save()
+
+        # TODO: Trigger your background AI generation task here (e.g. Celery task)
+        # generate_ai_budget_plan.delay(session.id)
+
+        return Response({
+            "success": True,
+            "message": "Sorğu emala göndərildi.",
+            "status": session.status
+        }, status=status.HTTP_200_OK)
+
+
+class FinancialInquiryStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+        is_completed = session.status == 'completed'
+        
+        status_messages = {
+            'pending': 'Sorğunuz növbəyə gözləyir...',
+            'processing': 'AI maliyyə məlumatlarınızı təhlil edir və büdcə planını qurur...',
+            'completed': 'Planınız hazırdır!',
+            'failed': 'Plan hazırlanarkən xəta baş verdi.'
+        }
+        
+        return Response({
+            "success": True,
+            "isCompleted": is_completed,
+            "status": session.status,
+            "message": status_messages.get(session.status, 'Yüklənir...'),
+        }, status=status.HTTP_200_OK)
+
+
+class RetryPlanGenerationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        session = FinancialInquirySession.objects.filter(user=request.user).first()
+        
+        if session and session.status == 'failed':
+            session.status = 'processing'
+            session.save()
+            
+            # TODO: Re-trigger your background AI task here
+            # generate_ai_budget_plan.delay(session.id)
+            
+            return Response({
+                "success": True,
+                "message": "Yenidən emala başlandı."
+            }, status=status.HTTP_200_OK)
+            
+        return Response({
+            "success": False,
+            "message": "Yenidən cəhd etmək mümkün deyil."
+        }, status=status.HTTP_400_BAD_REQUEST)

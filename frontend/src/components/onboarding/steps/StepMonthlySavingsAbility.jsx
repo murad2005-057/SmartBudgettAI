@@ -1,6 +1,10 @@
 import React from 'react'
 
-const SAVINGS_OPTIONS = ['Bəli, müntəzəm', 'Bəzən', 'Xeyr']
+const SAVINGS_OPTIONS = [
+  { id: 'can_save', label: 'Bəli, müntəzəm' },
+  { id: 'sometimes', label: 'Bəzən' },
+  { id: 'cannot_save', label: 'Xeyr' }
+]
 
 export function StepMonthlySavingsAbility({ value, onChange }) {
   return (
@@ -9,13 +13,13 @@ export function StepMonthlySavingsAbility({ value, onChange }) {
       <div className="savings-ability-options">
         {SAVINGS_OPTIONS.map((option) => (
           <button
-            key={option}
+            key={option.id}
             type="button"
-            className={`savings-ability-option${value === option ? ' is-selected' : ''}`}
-            onClick={() => onChange(option)}
-            aria-pressed={value === option}
+            className={`savings-ability-option${value === option.id ? ' is-selected' : ''}`}
+            onClick={() => onChange(option.id)}
+            aria-pressed={value === option.id}
           >
-            {option}
+            {option.label}
           </button>
         ))}
       </div>

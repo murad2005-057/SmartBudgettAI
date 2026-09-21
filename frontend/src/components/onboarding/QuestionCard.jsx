@@ -37,6 +37,8 @@ export function QuestionCard({ onboarding, submittedFormData, onComplete }) {
     isCurrentStepValid
   } = onboarding
 
+  
+
   const isCompleted = currentStep > totalSteps
 
   const renderStepContent = () => {

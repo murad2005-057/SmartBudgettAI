@@ -3,8 +3,8 @@ from .views import (
     RegisterView, UpdateSalaryView, UpdateExtraIncomeView, UpdateHousingView,
     UpdateHasCreditView, CreditListCreateView, CreditDetailView,
     UpdateSavingsGoalsView, UpdateMonthlyExpensesView, UpdateRecurringExpensesView,
-    UpdateFinancialAssessmentView,
-    
+    UpdateFinancialAssessmentView, UpdateMonthlySavingsAbilityView,
+    CompleteOnboardingView, FinancialInquiryStatusView, RetryPlanGenerationView,
 )
 
 urlpatterns = [
@@ -19,7 +19,8 @@ urlpatterns = [
     path('financial-inquiry/monthly-expenses/', UpdateMonthlyExpensesView.as_view(), name='update-monthly-expenses'),
     path('financial-inquiry/recurring-expenses/', UpdateRecurringExpensesView.as_view(), name='update-recurring-expenses'),
     path('financial-inquiry/financial-assessment/', UpdateFinancialAssessmentView.as_view(), name='update-financial-assessment'),
-
-
-
+    path('financial-inquiry/monthly-savings-ability/', UpdateMonthlySavingsAbilityView.as_view(), name='update-monthly-savings-ability'),
+    path('financial-inquiry/complete/', CompleteOnboardingView.as_view(), name='complete-onboarding'),
+    path('financial-inquiry/status/', FinancialInquiryStatusView.as_view(), name='inquiry-status'),
+    path('financial-inquiry/retry/', RetryPlanGenerationView.as_view(), name='retry-plan'),
 ]

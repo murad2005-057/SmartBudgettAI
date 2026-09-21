@@ -1,7 +1,7 @@
 import re
 from django.contrib.auth.models import User
 from rest_framework import serializers
-from .models import Credit, SavingsGoal
+from .models import Credit, SavingsGoal, FinancialInquirySession
 
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -44,9 +44,8 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
         )
         return user
-    
-    
-    
+
+
 class SalaryUpdateSerializer(serializers.Serializer):
     salary = serializers.DecimalField(max_digits=12, decimal_places=2)
 
@@ -54,8 +53,8 @@ class SalaryUpdateSerializer(serializers.Serializer):
         if value <= 0:
             raise serializers.ValidationError("Əmək haqqı müsbət ədəd olmalıdır.")
         return value
-    
-    
+
+
 class ExtraIncomeUpdateSerializer(serializers.Serializer):
     hasExtraIncome = serializers.ChoiceField(choices=['Bəli', 'Xeyr'])
     extraIncome = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, allow_null=True)
@@ -73,7 +72,7 @@ class ExtraIncomeUpdateSerializer(serializers.Serializer):
             attrs['extraIncome'] = None
 
         return attrs
-    
+
 
 class HousingUpdateSerializer(serializers.Serializer):
     housingType = serializers.ChoiceField(choices=['Özümündür', 'Kirayədir', 'İpotekadır'])
@@ -93,7 +92,7 @@ class HousingUpdateSerializer(serializers.Serializer):
                 )
 
         return attrs
-    
+
 
 class HasCreditSerializer(serializers.Serializer):
     hasCredit = serializers.ChoiceField(choices=['Bəli', 'Xeyr'])
@@ -118,13 +117,18 @@ class CreditSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Qalan ay sayı müsbət tam ədəd olmalıdır.")
         return value
-    
-    
+
 
 class SavingsGoalSerializer(serializers.Serializer):
-    id = serializers.ChoiceField(choices=[c[0] for c in SavingsGoal.GOAL_CHOICES])
+    id = serializers.CharField(max_length=50)
     customName = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    priority = serializers.ChoiceField(choices=[c[0] for c in SavingsGoal.PRIORITY_CHOICES])
+    
+    priority = serializers.ChoiceField(choices=[
+        ('Yuxarı prioritet', 'Yuxarı prioritet'),
+        ('Yüksək prioritet', 'Yüksək prioritet'),
+        ('Orta prioritet', 'Orta prioritet'),
+        ('Aşağı prioritet', 'Aşağı prioritet'),
+    ])
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
 
     def validate_amount(self, value):
@@ -142,8 +146,7 @@ class SavingsGoalSerializer(serializers.Serializer):
 
 class SavingsGoalsUpdateSerializer(serializers.Serializer):
     goals = SavingsGoalSerializer(many=True)
-    
-    
+
 
 class MonthlyExpensesSerializer(serializers.Serializer):
     market = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=0)
@@ -160,8 +163,8 @@ class MonthlyExpensesSerializer(serializers.Serializer):
             if value is not None and value < 0:
                 raise serializers.ValidationError({field: "Mənfi məbləğ qəbul edilmir."})
         return attrs
-    
-    
+
+
 EXPENSE_CATEGORY_KEYS = ['market', 'clothing', 'restaurant', 'entertainment', 'transport', 'onlineShopping', 'utilities', 'other']
 
 class RecurringExpensesSerializer(serializers.Serializer):
@@ -174,8 +177,8 @@ class RecurringExpensesSerializer(serializers.Serializer):
         if invalid:
             raise serializers.ValidationError(f"Naməlum xərc kateqoriyası: {', '.join(invalid)}")
         return value
-    
-    
+
+
 ASSESSMENT_TEXT_TO_CODE = {
     'Pulumu yaxşı idarə edə bilirəm': 'good_manager',
     'Bəzən planı poza bilirəm': 'sometimes_breaks_plan',
@@ -184,3 +187,36 @@ ASSESSMENT_TEXT_TO_CODE = {
 
 class FinancialAssessmentSerializer(serializers.Serializer):
     financialAssessment = serializers.ChoiceField(choices=list(ASSESSMENT_TEXT_TO_CODE.keys()))
+
+
+SAVINGS_ABILITY_CHOICES = [
+    'can_save', 'sometimes', 'cannot_save',
+    'Bəli, müntəzəm', 'Bəzən', 'Xeyr'
+]
+
+class MonthlySavingsAbilitySerializer(serializers.Serializer):
+    monthly_savings_ability = serializers.ChoiceField(choices=SAVINGS_ABILITY_CHOICES)
+
+
+ANNUAL_PRIORITY_CHOICES = [
+    ('Daha çox qənaət etmək', 'Daha çox qənaət etmək'),
+    ('Xərclərə nəzarət etmək', 'Xərclərə nəzarət etmək'),
+    ('Borcları azaltmaq', 'Borcları azaltmaq'),
+    ('Gəliri daha düzgün bölüşdürmək', 'Gəliri daha düzgün bölüşdürmək'),
+    ('Gözlənilməz xərclərə hazır olmaq', 'Gözlənilməz xərclərə hazır olmaq'),
+    ('Gələcək üçün pul toplamaq', 'Gələcək üçün pul toplamaq'),
+    ('Yığımları artırmaq', 'Yığımları artırmaq'),
+    ('Borcları daha sürətli bağlamaq', 'Borcları daha sürətli bağlamaq'),
+    ('Balanslı yaşamaq (yığım + əyləncə)', 'Balanslı yaşamaq (yığım + əyləncə)'),
+    ('Gələcəyə yatırım etmək', 'Gələcəyə yatırım etmək'),
+]
+
+class CompleteOnboardingSerializer(serializers.Serializer):
+    annualBudgetPriority = serializers.ChoiceField(choices=ANNUAL_PRIORITY_CHOICES)
+
+
+class FinancialInquirySessionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FinancialInquirySession
+        fields = '__all__'
+        read_only_fields = ['user']
