@@ -230,9 +230,19 @@ export async function updateFinancialAssessment(financialAssessment) {
 export async function updateMonthlySavingsAbility(monthlySavingsAbility) {
   return fetchWithAuth(`${API_BASE_URL}/financial-inquiry/monthly-savings-ability/`, {
     method: 'PATCH',
-    body: JSON.stringify({ monthly_savings_ability: monthlySavingsAbility })
+    body: JSON.stringify({ monthlySavingsAbility })
   })
 }
+
+export async function checkInquiryStatus() {
+  return fetchWithAuth(`${API_BASE_URL}/financial-inquiry/status/`)
+}
+
+
+
+
+
+
 
 export async function completeOnboarding(annualBudgetPriority) {
   return fetchWithAuth(`${API_BASE_URL}/financial-inquiry/complete/`, {
@@ -241,8 +251,95 @@ export async function completeOnboarding(annualBudgetPriority) {
   })
 }
 
-
-
-export async function checkInquiryStatus() {
+export async function getInquiryStatus() {
   return fetchWithAuth(`${API_BASE_URL}/financial-inquiry/status/`)
+}
+
+export async function retryPlanGeneration() {
+  return fetchWithAuth(`${API_BASE_URL}/financial-inquiry/retry/`, {
+    method: 'POST'
+  })
+}
+
+export async function getFinancialSummary() {
+  return fetchWithAuth(`${API_BASE_URL}/summary/`)
+}
+
+export async function getSavingsGoalsProgress() {
+  return fetchWithAuth(`${API_BASE_URL}/summary/goals/`)
+}
+
+export async function getMonthlyBudgetTable() {
+  return fetchWithAuth(`${API_BASE_URL}/summary/table/`)
+}
+
+export async function getBudgetComparison() {
+  return fetchWithAuth(`${API_BASE_URL}/summary/comparison/`)
+}
+
+
+
+
+async function downloadAuthenticatedFile(url, fallbackFilename) {
+  const accessToken = localStorage.getItem('access_token')
+
+  let response
+  try {
+    response = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    })
+
+    if (response.status === 401) {
+      const newToken = await (async () => {
+        // reuse the same refresh logic fetchWithAuth relies on
+        const refreshToken = localStorage.getItem('refresh_token')
+        const refreshResponse = await fetch(`${API_BASE_URL}/token/refresh/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh: refreshToken })
+        })
+        if (!refreshResponse.ok) throw new Error('Sessiya bitib. Zəhmət olmasa yenidən daxil olun.')
+        const data = await refreshResponse.json()
+        localStorage.setItem('access_token', data.access)
+        return data.access
+      })()
+
+      response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${newToken}` }
+      })
+    }
+  } catch {
+    throw new Error('Serverlə əlaqə qurula bilmədi. Zəhmət olmasa bir az sonra yenidən cəhd edin.')
+  }
+
+  if (!response.ok) {
+    throw new Error('Fayl endirilə bilmədi.')
+  }
+
+  const blob = await response.blob()
+
+  // Pull the real filename from the server's Content-Disposition header if present
+  const disposition = response.headers.get('Content-Disposition')
+  let filename = fallbackFilename
+  if (disposition) {
+    const match = disposition.match(/filename=([^;]+)/)
+    if (match) filename = match[1].trim()
+  }
+
+  const blobUrl = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = blobUrl
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(blobUrl)
+}
+
+export async function downloadExcelReport() {
+  return downloadAuthenticatedFile(`${API_BASE_URL}/summary/export/excel/`, 'budce_plani.xlsx')
+}
+
+export async function downloadPdfReport() {
+  return downloadAuthenticatedFile(`${API_BASE_URL}/summary/export/pdf/`, 'budce_plani.pdf')
 }

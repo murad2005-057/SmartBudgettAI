@@ -1,12 +1,14 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { LuShieldCheck } from 'react-icons/lu'
 import { OnboardingLayout } from './components/onboarding/OnboardingLayout'
 import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY } from './hooks/useOnboardingForm'
-import { registerUser } from './services/api'
+import { registerUser, checkInquiryStatus } from './services/api'
 import './App.css'
-import { checkInquiryStatus } from './services/api'
 
-function App() {
+export function App() {
+  const navigate = useNavigate()
+
   const savedAccount = (() => {
     try {
       const value = window.localStorage.getItem(ACCOUNT_STORAGE_KEY)
@@ -19,6 +21,7 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(() =>
     window.localStorage.getItem(ONBOARDING_ACTIVE_KEY) === 'true'
   )
+  
   const [formData, setFormData] = useState(savedAccount?.formData || {
     fullName: '',
     email: '',
@@ -46,7 +49,6 @@ function App() {
     formData.password.length >= 8 &&
     /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]/.test(formData.password)
 
-  // Overall form validity boolean for button enabling/disabling
   const isFormValid = isFullNameValid && isEmailValid && isPasswordValid
 
   const handleChange = (e) => {
@@ -77,14 +79,14 @@ function App() {
     setIsLoading(true)
 
     try {
-      // 1. Call Django Backend API to register user and obtain JWT tokens
+      // 1. Django Backend API vasitəsilə qeydiyyat
       await registerUser({
         fullName: formData.fullName.trim(),
         email: formData.email.trim(),
         password: formData.password
       })
 
-      // 2. Update local state and trigger transition
+      // 2. LocalStorage yenilənməsi və state keçidi
       setIsSubmitted(true)
       window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
       window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
@@ -110,9 +112,8 @@ function App() {
 
   return (
     <main className="app-layout">
-      {/* LEFT PANEL */}
+      {/* SOL PANEL */}
       <section className="left-panel">
-        {/* Top Header Logo */}
         <header className="brand-container">
           <div className="brand-icon-box" aria-hidden="true">
             <svg
@@ -135,7 +136,6 @@ function App() {
           </div>
         </header>
 
-        {/* Hero Content Section */}
         <div className="hero-main-content">
           <div className="pill-badge-outline">
             <svg className="spark-icon" viewBox="0 0 24 24" fill="currentColor">
@@ -162,7 +162,7 @@ function App() {
         <div className="left-footer-spacer"></div>
       </section>
 
-      {/* RIGHT PANEL */}
+      {/* SAĞ PANEL */}
       <section className="right-panel">
         <div className="card-container">
           <h3 className="card-title">Başlamaq üçün məlumatlarınızı daxil edin</h3>
@@ -185,11 +185,8 @@ function App() {
           )}
 
           <form onSubmit={handleSubmit} noValidate>
-            {/* Input: Ad və soyad */}
             <div className="form-field">
-              <label htmlFor="fullName" className="field-label">
-                Ad və soyad
-              </label>
+              <label htmlFor="fullName" className="field-label">Ad və soyad</label>
               <input
                 id="fullName"
                 name="fullName"
@@ -201,16 +198,11 @@ function App() {
                 aria-invalid={showFullNameError}
                 disabled={isLoading}
               />
-              {showFullNameError && (
-                <p className="error-text">Ad və soyad hissəsini doldurun.</p>
-              )}
+              {showFullNameError && <p className="error-text">Ad və soyad hissəsini doldurun.</p>}
             </div>
 
-            {/* Input: Email */}
             <div className="form-field">
-              <label htmlFor="email" className="field-label">
-                Email
-              </label>
+              <label htmlFor="email" className="field-label">Email</label>
               <input
                 id="email"
                 name="email"
@@ -222,16 +214,11 @@ function App() {
                 aria-invalid={showEmailError}
                 disabled={isLoading}
               />
-              {showEmailError && (
-                <p className="error-text">Düzgün email ünvanı daxil edin ('@' işarəsi mütləqdir).</p>
-              )}
+              {showEmailError && <p className="error-text">Düzgün email ünvanı daxil edin ('@' işarəsi mütləqdir).</p>}
             </div>
 
-            {/* Input: Şifrə */}
             <div className="form-field">
-              <label htmlFor="password" className="field-label">
-                Şifrə
-              </label>
+              <label htmlFor="password" className="field-label">Şifrə</label>
               <input
                 id="password"
                 name="password"
@@ -243,27 +230,16 @@ function App() {
                 aria-invalid={showPasswordError}
                 disabled={isLoading}
               />
-              {showPasswordError && (
-                <p className="error-text">Şifrə ən azı 8 simvol olmalı və xüsusi simvol (!@#$...) ehtiva etməlidir.</p>
-              )}
+              {showPasswordError && <p className="error-text">Şifrə ən azı 8 simvol olmalı və xüsusi simvol ehtiva etməlidir.</p>}
             </div>
 
-            {/* Primary Button */}
             <button
               type="submit"
               className="btn-submit"
               disabled={!isFormValid || isLoading}
             >
               <span>{isLoading ? 'Gözləyin...' : 'Planlamaya başla'}</span>
-              <svg
-                className="btn-arrow-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
+              <svg className="btn-arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 18 15 12 9 6" />
               </svg>
             </button>
@@ -275,21 +251,3 @@ function App() {
 }
 
 export default App
-
-
-async function handlePostLoginRouting(navigate) {
-  try {
-    const data = await checkInquiryStatus()
-    
-    if (data && data.isCompleted) {
-      // Əgər 10 sual əvvəlcədən tamamlanıbsa, birbaşa AI plan cədvəlinə/dashboard-a yönləndir
-      navigate('/dashboard') // və ya plan səhifənizin route-u
-    } else {
-      // Əgər bitməyibsə, qaldığı yerdən (və ya onboarding-dən) davam etdir
-      navigate('/onboarding')
-    }
-  } catch (err) {
-    console.error("Status yoxlanmadı:", err)
-    navigate('/login')
-  }
-}

@@ -120,15 +120,13 @@ class CreditSerializer(serializers.ModelSerializer):
 
 
 class SavingsGoalSerializer(serializers.Serializer):
-    id = serializers.CharField(max_length=50)
+    # FIXED: was a plain CharField, accepting any string. Tied to the model's
+    # actual GOAL_CHOICES now, so an invalid/typo'd goal id is rejected here
+    # instead of silently reaching the database.
+    id = serializers.ChoiceField(choices=[c[0] for c in SavingsGoal.GOAL_CHOICES])
     customName = serializers.CharField(required=False, allow_blank=True, max_length=100)
-    
-    priority = serializers.ChoiceField(choices=[
-        ('Yuxarı prioritet', 'Yuxarı prioritet'),
-        ('Yüksək prioritet', 'Yüksək prioritet'),
-        ('Orta prioritet', 'Orta prioritet'),
-        ('Aşağı prioritet', 'Aşağı prioritet'),
-    ])
+
+    priority = serializers.ChoiceField(choices=[c[0] for c in SavingsGoal.PRIORITY_CHOICES])
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
 
     def validate_amount(self, value):
@@ -189,15 +187,11 @@ class FinancialAssessmentSerializer(serializers.Serializer):
     financialAssessment = serializers.ChoiceField(choices=list(ASSESSMENT_TEXT_TO_CODE.keys()))
 
 
-SAVINGS_ABILITY_CHOICES = [
-    'can_save', 'sometimes', 'cannot_save',
-    'Bəli, müntəzəm', 'Bəzən', 'Xeyr'
-]
-
 class MonthlySavingsAbilitySerializer(serializers.Serializer):
-    monthly_savings_ability = serializers.ChoiceField(choices=SAVINGS_ABILITY_CHOICES)
-
-
+    monthlySavingsAbility = serializers.ChoiceField(
+        choices=[c[0] for c in __import__('users.models', fromlist=['FinancialInquirySession']).FinancialInquirySession.SAVINGS_ABILITY_CHOICES]
+    )
+    
 ANNUAL_PRIORITY_CHOICES = [
     ('Daha çox qənaət etmək', 'Daha çox qənaət etmək'),
     ('Xərclərə nəzarət etmək', 'Xərclərə nəzarət etmək'),
@@ -205,6 +199,12 @@ ANNUAL_PRIORITY_CHOICES = [
     ('Gəliri daha düzgün bölüşdürmək', 'Gəliri daha düzgün bölüşdürmək'),
     ('Gözlənilməz xərclərə hazır olmaq', 'Gözlənilməz xərclərə hazır olmaq'),
     ('Gələcək üçün pul toplamaq', 'Gələcək üçün pul toplamaq'),
+    # NOTE: the 4 options below are NOT in the model's ANNUAL_PRIORITY_CHOICES.
+    # They'll validate and save fine (Django doesn't enforce `choices` at the
+    # DB level), but they're undeclared on the model — either add them to
+    # FinancialInquirySession.ANNUAL_PRIORITY_CHOICES too, or remove them here
+    # so both sides agree on the same 6 options. Left in for now since removing
+    # them without knowing which your frontend actually uses could break it.
     ('Yığımları artırmaq', 'Yığımları artırmaq'),
     ('Borcları daha sürətli bağlamaq', 'Borcları daha sürətli bağlamaq'),
     ('Balanslı yaşamaq (yığım + əyləncə)', 'Balanslı yaşamaq (yığım + əyləncə)'),

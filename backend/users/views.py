@@ -12,14 +12,14 @@ from reportlab.pdfgen import canvas
 
 from .models import (
     FinancialInquirySession, Credit, SavingsGoal,
-    )
+)
 
 from .serializers import (
     RegisterSerializer, SalaryUpdateSerializer, ExtraIncomeUpdateSerializer,
     HousingUpdateSerializer, HasCreditSerializer, CreditSerializer,
     SavingsGoalsUpdateSerializer, MonthlyExpensesSerializer, RecurringExpensesSerializer,
     FinancialAssessmentSerializer, MonthlySavingsAbilitySerializer,
-    CompleteOnboardingSerializer, ASSESSMENT_TEXT_TO_CODE
+    CompleteOnboardingSerializer, ASSESSMENT_TEXT_TO_CODE,
 )
 
 
@@ -293,15 +293,14 @@ class UpdateMonthlySavingsAbilityView(APIView):
         serializer.is_valid(raise_exception=True)
 
         session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
-        session.monthly_savings_ability = serializer.validated_data['monthly_savings_ability']
+        session.monthly_savings_ability = serializer.validated_data['monthlySavingsAbility']
         session.save()
 
         return Response({
             "success": True,
             "message": "Aylıq yığım qabiliyyəti saxlanıldı.",
             "monthlySavingsAbility": session.monthly_savings_ability
-        }, status=status.HTTP_200_OK)
-
+        }, status=status.HTTP_200_OK)   
 
 
 class CompleteOnboardingView(APIView):
@@ -320,7 +319,7 @@ class CompleteOnboardingView(APIView):
             )
 
         session.annual_budget_priority = serializer.validated_data['annualBudgetPriority']
-        
+
         session.status = 'processing'
         session.save()
 
@@ -334,11 +333,15 @@ class CompleteOnboardingView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+        session.refresh_from_db()
+
         return Response({
             "success": True,
             "message": "Sorğu emal edildi və plan hazırdır.",
-            "status": session.status
+            "status": session.status,
+            "session_id": session.id 
         }, status=status.HTTP_200_OK)
+
 
 class FinancialInquiryStatusView(APIView):
     permission_classes = [IsAuthenticated]
@@ -346,14 +349,14 @@ class FinancialInquiryStatusView(APIView):
     def get(self, request):
         session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
         is_completed = session.status == 'completed'
-        
+
         status_messages = {
             'pending': 'Sorğunuz növbəyə gözləyir...',
             'processing': 'AI maliyyə məlumatlarınızı təhlil edir və büdcə planını qurur...',
             'completed': 'Planınız hazırdır!',
             'failed': 'Plan hazırlanarkən xəta baş verdi.'
         }
-        
+
         return Response({
             "success": True,
             "isCompleted": is_completed,
@@ -367,294 +370,293 @@ class RetryPlanGenerationView(APIView):
 
     def post(self, request):
         session = FinancialInquirySession.objects.filter(user=request.user).first()
-        
+
         if session and session.status == 'failed':
             session.status = 'processing'
             session.save()
-            
-            # TODO: Re-trigger your background AI task here
-            # generate_ai_budget_plan.delay(session.id)
-            
+
+            # FIXED: this used to be a no-op TODO while claiming success.
+            try:
+                generate_ai_budget_plan(session.id)
+                session.refresh_from_db()
+            except Exception:
+                session.status = 'failed'
+                session.save()
+                return Response({
+                    "success": False,
+                    "message": "Yenidən cəhd uğursuz oldu."
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
             return Response({
                 "success": True,
-                "message": "Yenidən emala başlandı."
+                "message": "Yenidən emala başlandı.",
+                "status": session.status
             }, status=status.HTTP_200_OK)
-            
+
         return Response({
             "success": False,
             "message": "Yenidən cəhd etmək mümkün deyil."
         }, status=status.HTTP_400_BAD_REQUEST)
-        
+
+
 
 
 class FinancialSummaryAPIView(APIView):
-    def get(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            if session.status != 'completed':
-                return Response({
-                    "status": "pending", 
-                    "message": "AI analysis is still in progress."
-                }, status=202)
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+
+        if session.status != 'completed':
             return Response({
-                "status": "success",
-                "data": {
-                    "recommended_monthly_savings": f"{session.recommended_monthly_savings:.2f} AZN",
-                    "recommended_annual_savings": f"{session.recommended_annual_savings:.2f} AZN",
-                    "financial_status": session.financial_status,
-                    "financial_status_description": getattr(session, 'financial_status_description', ''),
-                    "currency": "AZN"
-                }
-            }, status=200)
+                "status": "pending",
+                "message": "AI analysis is still in progress."
+            }, status=202)
 
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Session not found."}, status=404)
-        
+        return Response({
+            "status": "success",
+            "data": {
+                "recommended_monthly_savings": f"{session.recommended_monthly_savings:.2f} AZN",
+                "recommended_annual_savings": f"{session.recommended_annual_savings:.2f} AZN",
+                "financial_status": session.financial_status,
+                "financial_status_description": session.financial_status_description,
+                "currency": "AZN"
+            }
+        }, status=200)
+
 
 class SavingsGoalsProgressAPIView(APIView):
-    def get(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            if session.status != 'completed':
-                return Response({
-                    "status": "pending",
-                    "message": "AI analysis is still processing."
-                }, status=202)
+    permission_classes = [IsAuthenticated]
 
-            breakdown = getattr(session, 'savings_goals_breakdown', [])
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
 
-            formatted_goals = []
-            for goal in breakdown:
-                formatted_goals.append({
-                    "goal_name": goal.get("goal_name"),
-                    "target_amount": f"{goal.get('target_amount', 0):.2f} AZN",
-                    "current_amount": f"{goal.get('current_amount', 0):.2f} AZN",
-                    "progress_percentage": round(goal.get("progress_percentage", 0), 1),
-                    "recommended_monthly_saving": f"{goal.get('recommended_monthly_saving', 0):.2f} AZN",
-                    "priority": goal.get("priority", "Normal")
-                })
-
+        if session.status != 'completed':
             return Response({
-                "status": "success",
-                "data": formatted_goals
-            }, status=200)
+                "status": "pending",
+                "message": "AI analysis is still processing."
+            }, status=202)
 
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Session not found."}, status=404)
-        
-        
+        breakdown = session.savings_goals_breakdown or []
+
+        formatted_goals = []
+        for goal in breakdown:
+            formatted_goals.append({
+                "goal_name": goal.get("goal_name"),
+                "target_amount": f"{goal.get('target_amount', 0):.2f} AZN",
+                "current_amount": f"{goal.get('current_amount', 0):.2f} AZN",
+                "progress_percentage": round(goal.get("progress_percentage", 0), 1),
+                "recommended_monthly_saving": f"{goal.get('recommended_monthly_saving', 0):.2f} AZN",
+                "priority": goal.get("priority", "Normal")
+            })
+
+        return Response({
+            "status": "success",
+            "data": formatted_goals
+        }, status=200)
+
+
 class MonthlyBudgetTableAPIView(APIView):
-    def get(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            if session.status != 'completed':
-                return Response({
-                    "status": "pending",
-                    "message": "AI analysis is still processing."
-                }, status=202)
+    permission_classes = [IsAuthenticated]
 
-            monthly_table = getattr(session, 'monthly_table', [])
-            annual_totals = getattr(session, 'annual_totals', {})
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
 
-            formatted_table = []
-            for row in monthly_table:
-                formatted_table.append({
-                    "month_name": row.get("month_name"),
-                    "income": f"{float(row.get('income', 0)):.2f} AZN",
-                    "expenses": f"{float(row.get('expenses', 0)):.2f} AZN",
-                    "credit": f"{float(row.get('credit', 0)):.2f} AZN",
-                    "savings": f"{float(row.get('savings', 0)):.2f} AZN",
-                    "balance": f"{float(row.get('balance', 0)):.2f} AZN",
-                    "is_negative": float(row.get('balance', 0)) < 0  # Useful for frontend CSS highlighting
-                })
-
-            formatted_totals = {
-                "total_income": f"{float(annual_totals.get('total_income', 0)):.2f} AZN",
-                "total_expenses": f"{float(annual_totals.get('total_expenses', 0)):.2f} AZN",
-                "total_credit": f"{float(annual_totals.get('total_credit', 0)):.2f} AZN",
-                "total_savings": f"{float(annual_totals.get('total_savings', 0)):.2f} AZN",
-                "net_annual_balance": f"{float(annual_totals.get('net_annual_balance', 0)):.2f} AZN",
-                "is_negative": float(annual_totals.get('net_annual_balance', 0)) < 0
-            }
-
+        if session.status != 'completed':
             return Response({
-                "status": "success",
-                "monthly_table": formatted_table,
-                "annual_totals": formatted_totals
-            }, status=200)
+                "status": "pending",
+                "message": "AI analysis is still processing."
+            }, status=202)
 
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Session not found."}, status=404)
-        
-        
+        monthly_table = session.monthly_table or []
+        annual_totals = session.annual_totals or {}
+
+        formatted_table = []
+        for row in monthly_table:
+            formatted_table.append({
+                "month_name": row.get("month_name"),
+                "income": f"{float(row.get('income', 0)):.2f} AZN",
+                "expenses": f"{float(row.get('expenses', 0)):.2f} AZN",
+                "credit": f"{float(row.get('credit', 0)):.2f} AZN",
+                "savings": f"{float(row.get('savings', 0)):.2f} AZN",
+                "balance": f"{float(row.get('balance', 0)):.2f} AZN",
+                "is_negative": float(row.get('balance', 0)) < 0
+            })
+
+        formatted_totals = {
+            "total_income": f"{float(annual_totals.get('total_income', 0)):.2f} AZN",
+            "total_expenses": f"{float(annual_totals.get('total_expenses', 0)):.2f} AZN",
+            "total_credit": f"{float(annual_totals.get('total_credit', 0)):.2f} AZN",
+            "total_savings": f"{float(annual_totals.get('total_savings', 0)):.2f} AZN",
+            "net_annual_balance": f"{float(annual_totals.get('net_annual_balance', 0)):.2f} AZN",
+            "is_negative": float(annual_totals.get('net_annual_balance', 0)) < 0
+        }
+
+        return Response({
+            "status": "success",
+            "monthly_table": formatted_table,
+            "annual_totals": formatted_totals
+        }, status=200)
+
 
 class BudgetComparisonAPIView(APIView):
-    def get(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            if session.status != 'completed':
-                return Response({
-                    "status": "pending",
-                    "message": "AI analysis is still processing."
-                }, status=202)
+    permission_classes = [IsAuthenticated]
 
-            budget_comparison = getattr(session, 'budget_comparison', [])
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
 
-            formatted_comparison = []
-            for item in budget_comparison:
-                formatted_comparison.append({
-                    "category_name": item.get("category_name"),
-                    "percentage": f"{float(item.get('percentage', 0)):.1f}%",
-                    "current_monthly_amount": f"{float(item.get('current_monthly_amount', 0)):.2f} AZN",
-                    "recommended_monthly_amount": f"{float(item.get('recommended_monthly_amount', 0)):.2f} AZN",
-                    "annual_amount": f"{float(item.get('annual_amount', 0)):.2f} AZN",
-                    "status": item.get("status", "Optimal"),
-                    "ai_recommendation": item.get("ai_recommendation", "")
-                })
-
+        if session.status != 'completed':
             return Response({
-                "status": "success",
-                "budget_comparison": formatted_comparison
-            }, status=200)
+                "status": "pending",
+                "message": "AI analysis is still processing."
+            }, status=202)
 
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Session not found."}, status=404)
-        
-        
+        budget_comparison = session.budget_comparison or []
 
+        formatted_comparison = []
+        for item in budget_comparison:
+            formatted_comparison.append({
+                "category_name": item.get("category_name"),
+                "percentage": f"{float(item.get('percentage', 0)):.1f}%",
+                "current_monthly_amount": f"{float(item.get('current_monthly_amount', 0)):.2f} AZN",
+                "recommended_monthly_amount": f"{float(item.get('recommended_monthly_amount', 0)):.2f} AZN",
+                "annual_amount": f"{float(item.get('annual_amount', 0)):.2f} AZN",
+                "status": item.get("status", "Optimal"),
+                "ai_recommendation": item.get("ai_recommendation", "")
+            })
+
+        return Response({
+            "status": "success",
+            "budget_comparison": formatted_comparison
+        }, status=200)
 
 
 class RecalculateBudgetAPIView(APIView):
-    def put(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            data = request.data
-            
-            if 'salary' in data:
-                session.salary = data['salary']
-            if 'market' in data:
-                session.market = data['market']
-            if 'utilities' in data:
-                session.utilities = data['utilities']
-            if 'transport' in data:
-                session.transport = data['transport']
-            if 'restaurant' in data:
-                session.restaurant = data['restaurant']
-            if 'clothing' in data:
-                session.clothing = data['clothing']
-            if 'entertainment' in data:
-                session.entertainment = data['entertainment']
-            if 'online_shopping' in data:
-                session.online_shopping = data['online_shopping']
-            if 'other' in data:
-                session.other = data['other']
-            
-            session.status = 'pending'
-            session.save()
-            
-            generate_ai_budget_plan(session.id)
-            
-            session.refresh_from_db()
-            
-            return Response({
-                "status": "success",
-                "message": "Plan uğurla yenidən hesablandı.",
-                "session_id": session.id,
-                "financial_status": session.financial_status
-            }, status=status.HTTP_200_OK)
+    permission_classes = [IsAuthenticated]
 
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Sessiya tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
-        
-        
+    def put(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+
+        data = request.data
+
+        # FIXED: was writing to session.market / session.utilities / etc.,
+        # which don't exist on the model — silently did nothing before.
+        field_map = {
+            'salary': 'salary',
+            'market': 'expense_market',
+            'utilities': 'expense_utilities',
+            'transport': 'expense_transport',
+            'restaurant': 'expense_restaurant',
+            'clothing': 'expense_clothing',
+            'entertainment': 'expense_entertainment',
+            'online_shopping': 'expense_online_shopping',
+            'other': 'expense_other',
+        }
+        for incoming_key, model_field in field_map.items():
+            if incoming_key in data:
+                setattr(session, model_field, data[incoming_key])
+
+        session.status = 'pending'
+        session.save()
+
+        try:
+            generate_ai_budget_plan(session.id)
+        except Exception:
+            session.status = 'failed'
+            session.save()
+            return Response(
+                {"status": "error", "message": "Yenidən hesablama zamanı xəta baş verdi."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        session.refresh_from_db()
+
+        return Response({
+            "status": "success",
+            "message": "Plan uğurla yenidən hesablandı.",
+            "financial_status": session.financial_status
+        }, status=status.HTTP_200_OK)
 
 
 class ExportExcelAPIView(APIView):
-    def get(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.title = "Büdcə Planı"
-            
-            ws.append(["Şəxsi Maliyyə Büdcə Hesabatı"])
-            ws.append([f"Maliyyə Statusu: {session.financial_status}"])
-            ws.append([f"Tövsiyə olunan aylıq qənaət: {session.recommended_monthly_savings} AZN"])
-            ws.append([f"Tarix: {datetime.now().strftime('%Y-%m-%d')}"])
-            ws.append([])
-            
-            ws.append(["Ay", "Gəlir (AZN)", "Xərc (AZN)", "Kredit (AZN)", "Qənaət (AZN)", "Balans (AZN)"])
-            
-            monthly_table = session.monthly_table or []
-            for row in monthly_table:
-                ws.append([
-                    row.get("month_name"),
-                    row.get("income"),
-                    row.get("expenses"),
-                    row.get("credit"),
-                    row.get("savings"),
-                    row.get("balance")
-                ])
-                
-            ws.append([])
-            annual = session.annual_totals or {}
-            ws.append(["İllik Cəmi", annual.get("total_income", 0), annual.get("total_expenses", 0), annual.get("total_credit", 0), annual.get("total_savings", 0), annual.get("net_annual_balance", 0)])
-            
-            response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            date_str = datetime.now().strftime('%Y%m%d')
-            response['Content-Disposition'] = f'attachment; filename=budce_plani_{session_id}_{date_str}.xlsx'
-            wb.save(response)
-            return response
-            
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Sessiya tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
-        
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Büdcə Planı"
+
+        ws.append(["Şəxsi Maliyyə Büdcə Hesabatı"])
+        ws.append([f"Maliyyə Statusu: {session.financial_status}"])
+        ws.append([f"Tövsiyə olunan aylıq qənaət: {session.recommended_monthly_savings} AZN"])
+        ws.append([f"Tarix: {datetime.now().strftime('%Y-%m-%d')}"])
+        ws.append([])
+
+        ws.append(["Ay", "Gəlir (AZN)", "Xərc (AZN)", "Kredit (AZN)", "Qənaət (AZN)", "Balans (AZN)"])
+
+        monthly_table = session.monthly_table or []
+        for row in monthly_table:
+            ws.append([
+                row.get("month_name"),
+                row.get("income"),
+                row.get("expenses"),
+                row.get("credit"),
+                row.get("savings"),
+                row.get("balance")
+            ])
+
+        ws.append([])
+        annual = session.annual_totals or {}
+        ws.append([
+            "İllik Cəmi", annual.get("total_income", 0), annual.get("total_expenses", 0),
+            annual.get("total_credit", 0), annual.get("total_savings", 0), annual.get("net_annual_balance", 0)
+        ])
+
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        date_str = datetime.now().strftime('%Y%m%d')
+        response['Content-Disposition'] = f'attachment; filename=budce_plani_{date_str}.xlsx'
+        wb.save(response)
+        return response
+
 
 class ExportPDFAPIView(APIView):
-    def get(self, request, session_id):
-        try:
-            session = FinancialInquirySession.objects.get(id=session_id)
-            
-            response = HttpResponse(content_type='application/pdf')
-            date_str = datetime.now().strftime('%Y%m%d')
-            response['Content-Disposition'] = f'attachment; filename=budce_plani_{session_id}_{date_str}.pdf'
-            
-            p = canvas.Canvas(response, pagesize=letter)
-            width, height = letter
-            
-            p.setFont("Helvetica-Bold", 14)
-            p.drawString(50, height - 40, "Maliyyə Büdcə Planı Hesabatı")
-            
-            p.setFont("Helvetica", 10)
-            p.drawString(50, height - 60, f"Maliyyə Statusu: {session.financial_status}")
-            p.drawString(50, height - 75, f"Tövsiyə olunan aylıq qənaət: {session.recommended_monthly_savings} AZN")
-            p.drawString(50, height - 90, f"Yaradılma tarixi: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            
-            y = height - 120
-            p.setFont("Helvetica-Bold", 9)
-            p.drawString(50, y, "Ay          Gəlir        Xərc        Kredit       Qənaət       Balans")
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+
+        response = HttpResponse(content_type='application/pdf')
+        date_str = datetime.now().strftime('%Y%m%d')
+        response['Content-Disposition'] = f'attachment; filename=budce_plani_{date_str}.pdf'
+
+        p = canvas.Canvas(response, pagesize=letter)
+        width, height = letter
+
+        p.setFont("Helvetica-Bold", 14)
+        p.drawString(50, height - 40, "Maliyyə Büdcə Planı Hesabatı")
+
+        p.setFont("Helvetica", 10)
+        p.drawString(50, height - 60, f"Maliyyə Statusu: {session.financial_status}")
+        p.drawString(50, height - 75, f"Tövsiyə olunan aylıq qənaət: {session.recommended_monthly_savings} AZN")
+        p.drawString(50, height - 90, f"Yaradılma tarixi: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        y = height - 120
+        p.setFont("Helvetica-Bold", 9)
+        p.drawString(50, y, "Ay          Gəlir        Xərc        Kredit       Qənaət       Balans")
+        y -= 15
+
+        p.setFont("Helvetica", 9)
+        monthly_table = session.monthly_table or []
+        for row in monthly_table:
+            if y < 50:
+                p.showPage()
+                y = height - 50
+            line = f"{row.get('month_name', ''):<10} {str(row.get('income', 0)):<10} {str(row.get('expenses', 0)):<10} {str(row.get('credit', 0)):<10} {str(row.get('savings', 0)):<10} {str(row.get('balance', 0))}"
+            p.drawString(50, y, line)
             y -= 15
-            
-            p.setFont("Helvetica", 9)
-            monthly_table = session.monthly_table or []
-            for row in monthly_table:
-                if y < 50:
-                    p.showPage()
-                    y = height - 50
-                line = f"{row.get('month_name', ''):<10} {str(row.get('income', 0)):<10} {str(row.get('expenses', 0)):<10} {str(row.get('credit', 0)):<10} {str(row.get('savings', 0)):<10} {str(row.get('balance', 0))}"
-                p.drawString(50, y, line)
-                y -= 15
-                
-            p.showPage()
-            p.save()
-            return response
-            
-        except FinancialInquirySession.DoesNotExist:
-            return Response({"status": "error", "message": "Sessiya tapılmadı."}, status=status.HTTP_404_NOT_FOUND)
+
+        p.showPage()
+        p.save()
+        return response

@@ -83,6 +83,16 @@ class FinancialInquirySession(models.Model):
     # Step 10: Annual Budget Priority
     annual_budget_priority = models.CharField(max_length=50, choices=ANNUAL_PRIORITY_CHOICES, null=True, blank=True)
 
+    recommended_monthly_savings = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    recommended_annual_savings = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    financial_status = models.CharField(max_length=100, blank=True)
+    financial_status_description = models.TextField(blank=True)
+    ai_response_text = models.TextField(blank=True)
+    savings_goals_breakdown = models.JSONField(default=list, blank=True)
+    monthly_table = models.JSONField(default=list, blank=True)
+    annual_totals = models.JSONField(default=dict, blank=True)
+    budget_comparison = models.JSONField(default=list, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
