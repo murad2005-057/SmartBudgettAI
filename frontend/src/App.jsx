@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import axios from 'axios'
 import { LuShieldCheck } from 'react-icons/lu'
 import { OnboardingLayout } from './components/onboarding/OnboardingLayout'
 import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY } from './hooks/useOnboardingForm'
-import { registerUser, checkInquiryStatus } from './services/api'
+import { registerUser } from './services/api'
 import './App.css'
+
+const API_BASE = 'http://127.0.0.1:8000/api'
 
 export function App() {
   const navigate = useNavigate()
@@ -37,6 +40,30 @@ export function App() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
+
+  // Check backend on mount if localStorage was cleared, to see if user has an active plan session
+  useEffect(() => {
+    const checkServerSession = async () => {
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token')
+      if (!token) return
+
+      try {
+        const response = await axios.get(`${API_BASE}/financial-inquiry/status/`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (response.data) {
+          window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
+          setShowOnboarding(true)
+        }
+      } catch (err) {
+        // No active backend session found, clear local flags if necessary
+      }
+    }
+
+    if (!showOnboarding) {
+      checkServerSession()
+    }
+  }, [showOnboarding])
 
   // Validation functions
   const isFullNameValid = formData.fullName.trim().length > 0
@@ -79,14 +106,13 @@ export function App() {
     setIsLoading(true)
 
     try {
-      // 1. Django Backend API vasitəsilə qeydiyyat
+      // 1. Try to register a new account first
       await registerUser({
         fullName: formData.fullName.trim(),
         email: formData.email.trim(),
         password: formData.password
       })
 
-      // 2. LocalStorage yenilənməsi və state keçidi
       setIsSubmitted(true)
       window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
       window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
@@ -94,8 +120,46 @@ export function App() {
       setTimeout(() => {
         setShowOnboarding(true)
       }, 500)
+
     } catch (err) {
-      setApiError(err.message || 'Qeydiyyat zamanı xəta baş verdi.')
+      // 2. If registration fails because the email is already registered, log in automatically
+      const isEmailTaken = err.response?.status === 400 || (err.message && err.message.toLowerCase().includes('email'))
+
+      if (isEmailTaken) {
+        try {
+          // Attempt to log in with the existing credentials
+          const loginRes = await axios.post(`${API_BASE}/login/`, {
+            email: formData.email.trim(),
+            password: formData.password
+          })
+
+          const token = loginRes.data.access_token || loginRes.data.token || loginRes.data.access
+          if (token) {
+            localStorage.setItem('access_token', token)
+          }
+
+          window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
+
+          // 3. Fetch their session status to redirect to their last saved summary table
+          const headers = { Authorization: `Bearer ${token}` }
+          const statusRes = await axios.get(`${API_BASE}/financial-inquiry/status/`, { headers })
+          const sessionId = statusRes.data.session_id || statusRes.data.sessionId
+
+          if (sessionId) {
+            navigate(`/results/${sessionId}`)
+          } else {
+            // Fallback if session ID isn't returned directly
+            setIsSubmitted(true)
+            window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
+            setTimeout(() => { setShowOnboarding(true) }, 500)
+          }
+
+        } catch (loginErr) {
+          setApiError('Bu e-poçt artıq qeydiyyatdadır, lakin daxil etdiyiniz şifrə yanlışdır.')
+        }
+      } else {
+        setApiError(err.message || 'Qeydiyyat zamanı xəta baş verdi.')
+      }
     } finally {
       setIsLoading(false)
     }

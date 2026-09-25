@@ -231,6 +231,9 @@ export function useOnboardingForm(initialUserName = 'User') {
 
         if (formData.hasCredit === 'Bəli') {
           await syncCredits(formData.credits)
+        } else {
+          // Əgər kredit yoxdur seçilibsə, backend-dəki köhnə kreditləri təmizləmək üçün boş siyahı göndəririk
+          await syncCredits([])
         }
       } catch (err) {
         setStepError(err.message)

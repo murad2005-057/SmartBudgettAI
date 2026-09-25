@@ -137,9 +137,9 @@ class SavingsGoal(models.Model):
     ]
 
     PRIORITY_CHOICES = [
-        ('Yuxarı prioritet', 'Yüksək prioritet'),
-        ('Orta prioritet', 'Orta prioritet'),
-        ('Aşağı prioritet', 'Aşağı prioritet'),
+        ('Yuxarı prioritet', 'Yüksək'),
+        ('Orta prioritet', 'Orta'),
+        ('Aşağı prioritet', 'Aşağı'),
     ]
 
     session = models.ForeignKey(FinancialInquirySession, on_delete=models.CASCADE, related_name='savings_goals')

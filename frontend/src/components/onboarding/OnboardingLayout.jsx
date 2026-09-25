@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { Header } from './Header'
@@ -10,49 +10,8 @@ export function OnboardingLayout({ userName = 'User' }) {
   const onboarding = useOnboardingForm(userName)
   const navigate = useNavigate()
   const [loadingPhase, setLoadingPhase] = useState(null)
-  const [submittedFormData, setSubmittedFormData] = useState(null)
 
-  useEffect(() => {
-    if (loadingPhase === null) return undefined
-
-    const phaseTimer = window.setTimeout(() => setLoadingPhase(2), 2500)
-    
-    const completionTimer = window.setTimeout(async () => {
-      try {
-        const token = localStorage.getItem('access_token') || localStorage.getItem('token')
-
-        const response = await axios.post(
-          'http://127.0.0.1:8000/api/financial-inquiry/complete/', 
-          submittedFormData || onboarding.formData,
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          }
-        )
-
-        const sessionId = response.data.session_id || response.data.sessionId
-
-        if (sessionId) {
-        onboarding.finishOnboarding()
-          navigate(`/summary/${sessionId}`)
-        } else {
-          console.error("Session ID tapılmadı:", response.data)
-          setLoadingPhase(null)
-        }
-      } catch (err) {
-        console.error("Məlumatı göndərərkən xəta baş verdi:", err)
-        setLoadingPhase(null)
-      }
-    }, 5000)
-
-    return () => {
-      window.clearTimeout(phaseTimer)
-      window.clearTimeout(completionTimer)
-    }
-  }, [loadingPhase, submittedFormData, onboarding, navigate])
-
-  const handleComplete = (formData) => {
+  const handleComplete = async (formData) => {
     window.localStorage.removeItem(BUDGET_MONTHS_STORAGE_KEY)
     
     const payload = {
@@ -60,8 +19,41 @@ export function OnboardingLayout({ userName = 'User' }) {
       monthlySavingsAbility: formData.savingsGoal || formData.monthlySavingsAbility || 0
     }
 
-    setSubmittedFormData(payload)
+    // 1. Switch to the loading animation screen immediately
     setLoadingPhase(1)
+
+    // 2. Smooth UI phase transition timer (e.g., move to phase 2 after 2.5s)
+    const phaseTimer = window.setTimeout(() => setLoadingPhase(2), 2500)
+
+    try {
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token')
+
+      // 3. Fire the API request ONCE right here
+      const response = await axios.post(
+        'http://127.0.0.1:8000/api/financial-inquiry/complete/', 
+        payload,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      )
+
+      const sessionId = response.data.session_id || response.data.sessionId
+
+      if (sessionId) {
+        window.clearTimeout(phaseTimer)
+        onboarding.finishOnboarding()
+        navigate(`/summary/${sessionId}`)
+      } else {
+        console.error("Session ID tapılmadı:", response.data)
+        setLoadingPhase(null)
+      }
+    } catch (err) {
+      console.error("Məlumatı göndərərkən xəta baş verdi:", err)
+      window.clearTimeout(phaseTimer)
+      setLoadingPhase(null)
+    }
   }
 
   return (
@@ -71,7 +63,7 @@ export function OnboardingLayout({ userName = 'User' }) {
         {loadingPhase === null ? (
           <QuestionCard
             onboarding={onboarding}
-            submittedFormData={submittedFormData}
+            submittedFormData={null}
             onComplete={handleComplete}
           />
         ) : (
