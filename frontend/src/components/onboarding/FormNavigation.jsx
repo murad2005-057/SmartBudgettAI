@@ -7,13 +7,24 @@ export function FormNavigation({
   onPrev,
   showBack = true,
   disableNext = false,
-  nextLabel = 'Növbəti'
+  nextLabel = 'Növbəti',
+  isSubmitting = false
 }) {
+  const handleClick = (e) => {
+    e.preventDefault()
+    if (disableNext) return
+    if (onComplete) {
+      onComplete(e)
+    } else {
+      onNext(e)
+    }
+  }
+
   return (
     <div className="form-navigation-container">
       <div className="nav-left">
         {showBack && (
-          <button type="button" className="btn-back" onClick={onPrev}>
+          <button type="button" className="btn-back" onClick={onPrev} disabled={isSubmitting}>
             <LuChevronLeft size={18} />
             <span>Gəri</span>
           </button>
@@ -23,11 +34,11 @@ export function FormNavigation({
         <button
           type="button"
           className="btn-next"
-          onClick={onComplete || onNext}
+          onClick={handleClick}
           disabled={disableNext}
         >
-          <span>{nextLabel}</span>
-          <LuChevronRight size={18} />
+          <span>{isSubmitting ? 'Gözləyin...' : nextLabel}</span>
+          {!isSubmitting && <LuChevronRight size={18} />}
         </button>
       </div>
     </div>

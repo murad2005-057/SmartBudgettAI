@@ -286,16 +286,8 @@ export function useOnboardingForm(initialUserName = 'User') {
       }
     }
 
-    if (currentStep === 10) {
-      try {
-        await completeOnboarding(formData.annualBudgetPriority)
-        finishOnboarding()
-        return
-      } catch (err) {
-        setStepError(err.message)
-        return
-      }
-    }
+    // Step 10 final submission is handled by OnboardingLayout's onComplete prop.
+    // Do NOT call completeOnboarding() here — it creates a duplicate POST race condition.
 
     if (currentStep < totalSteps) {
       setCurrentStep((prev) => prev + 1)

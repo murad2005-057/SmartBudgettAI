@@ -211,8 +211,26 @@ ANNUAL_PRIORITY_CHOICES = [
     ('Gələcəyə yatırım etmək', 'Gələcəyə yatırım etmək'),
 ]
 
+VALID_ANNUAL_PRIORITIES = [c[0] for c in ANNUAL_PRIORITY_CHOICES]
+
+_DEFAULT_PRIORITY = 'Gəliri daha düzgün bölüşdürmək'
+
 class CompleteOnboardingSerializer(serializers.Serializer):
-    annualBudgetPriority = serializers.ChoiceField(choices=ANNUAL_PRIORITY_CHOICES)
+    annualBudgetPriority = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default=_DEFAULT_PRIORITY
+    )
+    monthlySavingsAbility = serializers.CharField(required=False, allow_blank=True, default='')
+
+    def validate_annualBudgetPriority(self, value):
+        # Empty string → use safe default
+        if not value or not value.strip():
+            return _DEFAULT_PRIORITY
+        if value not in VALID_ANNUAL_PRIORITIES:
+            print(f"=== UNKNOWN annualBudgetPriority: '{value}' — using default ===")
+            return _DEFAULT_PRIORITY
+        return value
 
 
 class FinancialInquirySessionSerializer(serializers.ModelSerializer):

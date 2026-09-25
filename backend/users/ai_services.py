@@ -89,10 +89,16 @@ def generate_ai_budget_plan(session_id):
 
             RULES — TEXT: every "ai_recommendation" is ONE short sentence, max ~10-12 words, plain everyday Azerbaijani, no jargon, no lists. Like a text from a friend, not a report. financial_status_description: also 1 short plain sentence. monthly_budget_plan: max 3-4 sentences.
 
-            Return ONLY a valid JSON object with EXACTLY these top-level keys: recommended_monthly_savings (float), recommended_annual_savings (float), financial_status (string), financial_status_description (string), monthly_budget_plan (string), savings_goals_breakdown (array of {{goal_name, target_amount, current_amount, progress_percentage, recommended_monthly_saving, priority}}), monthly_table (array of 12 {{month_name, income, market, restaurant, transport, utilities, clothing, entertainment, online_shopping, other, credit, savings, balance}}), annual_totals ({{total_income, total_market, total_restaurant, total_transport, total_utilities, total_clothing, total_entertainment, total_online_shopping, total_other, total_credit, total_savings, net_annual_balance}}), budget_comparison (array of {{category_name, percentage, current_monthly_amount, recommended_monthly_amount, annual_amount, status, ai_recommendation}}).
+            RULES — JSON SCHEMA (CRITICAL):
+            - You MUST return a single JSON object.
+            - "monthly_table" MUST be an array of EXACTLY 12 objects, one for each month (Yanvar, Fevral, Mart, Aprel, May, İyun, İyul, Avqust, Sentyabr, Oktyabr, Noyabr, Dekabr). No missing months.
+            - "budget_comparison" MUST be an array of EXACTLY 9 objects (market, restaurant, transport, utilities, clothing, entertainment, online_shopping, other, credit).
+            - Do not drop any keys.
+
+            Return ONLY a valid JSON object with EXACTLY these top-level keys: recommended_monthly_savings (float), recommended_annual_savings (float), financial_status (string), financial_status_description (string), monthly_budget_plan (string), savings_goals_breakdown (array of {{goal_name, target_amount, current_amount, progress_percentage, recommended_monthly_saving, priority}}), monthly_table (array of 12 {{month_name, income, market, restaurant, transport, utilities, clothing, entertainment, online_shopping, other, credit, savings, balance}}), annual_totals ({{total_income, total_market, total_restaurant, total_transport, total_utilities, total_clothing, total_entertainment, total_online_shopping, total_other, total_credit, total_savings, net_annual_balance}}), budget_comparison (array of EXACTLY 9 {{category_name, percentage, current_monthly_amount, recommended_monthly_amount, annual_amount, status, ai_recommendation}}).
 
             All numeric fields must be raw numbers, no "AZN" suffix, no strings for numbers. Return ONLY the JSON object, nothing else.
-            """
+        """
 
         api_key = getattr(settings, 'GROQ_API_KEY', None)
         if not api_key:

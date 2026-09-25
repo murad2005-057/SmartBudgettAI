@@ -346,31 +346,41 @@ class CompleteOnboardingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        print("=== /complete/ INCOMING request.data ===", request.data)
+
         serializer = CompleteOnboardingSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            print("=== SERIALIZER ERRORS ===", serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+        print(f"=== SESSION STATE === status={session.status} salary={session.salary}")
 
-        if session.status == 'processing':
-            return Response(
-                {"error": "Plan artıq hesablanma prosesindədir."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # Auto-reset stuck 'processing' or 'failed' sessions so users can retry
+        # without having to clear their database manually.
+        if session.status in ('processing', 'failed'):
+            print(f"=== Resetting session from '{session.status}' to allow retry ===")
+            session.status = 'pending'
+            session.save()
 
         if not session.salary or session.salary <= 0:
+            print("=== BLOCKED: salary is missing or 0 ===")
             return Response(
-                {"error": "Əmək haqqı daxil edilməyib."},
+                {"error": "Əmək haqqı daxil edilməyib. Zəhmət olmasa Step 1-i yenidən tamamlayın."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         session.annual_budget_priority = serializer.validated_data['annualBudgetPriority']
+        if serializer.validated_data.get('monthlySavingsAbility'):
+            session.monthly_savings_ability = serializer.validated_data['monthlySavingsAbility']
 
         session.status = 'processing'
         session.save()
 
         try:
             generate_ai_budget_plan(session.id)
-        except Exception:
+        except Exception as e:
+            print(f"=== AI generation failed: {e} ===")
             session.status = 'failed'
             session.save()
             return Response(
@@ -384,7 +394,7 @@ class CompleteOnboardingView(APIView):
             "success": True,
             "message": "Sorğu emal edildi və plan hazırdır.",
             "status": session.status,
-            "session_id": session.id 
+            "session_id": session.id
         }, status=status.HTTP_200_OK)
 
 

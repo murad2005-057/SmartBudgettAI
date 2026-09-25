@@ -5,54 +5,80 @@ import { Header } from './Header'
 import { QuestionCard } from './QuestionCard'
 import { LoadingPlan } from './LoadingPlan'
 import { BUDGET_MONTHS_STORAGE_KEY, useOnboardingForm } from '../../hooks/useOnboardingForm'
+import { updateSalary } from '../../services/api'
+
+const VALID_PRIORITIES = [
+  'Daha çox qənaət etmək',
+  'Xərclərə nəzarət etmək',
+  'Borcları azaltmaq',
+  'Gəliri daha düzgün bölüşdürmək',
+  'Gözlənilməz xərclərə hazır olmaq',
+  'Gələcək üçün pul toplamaq',
+]
 
 export function OnboardingLayout({ userName = 'User' }) {
   const onboarding = useOnboardingForm(userName)
   const navigate = useNavigate()
   const [loadingPhase, setLoadingPhase] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
 
   const handleComplete = async (formData) => {
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    setSubmitError(null)
     window.localStorage.removeItem(BUDGET_MONTHS_STORAGE_KEY)
-    
-    const payload = {
-      annualBudgetPriority: formData.annualBudgetPriority || 'balanced',
-      monthlySavingsAbility: formData.savingsGoal || formData.monthlySavingsAbility || 0
+
+    // Pre-flight: re-sync salary in case Step 1 API call failed silently.
+    // This ensures the backend never blocks /complete/ with "salary missing".
+    const salary = Number(formData.salary)
+    if (salary > 0) {
+      try {
+        await updateSalary(salary)
+      } catch (salaryErr) {
+        console.warn('Salary pre-sync failed (non-fatal):', salaryErr)
+      }
     }
 
-    // 1. Switch to the loading animation screen immediately
-    setLoadingPhase(1)
+    const annualBudgetPriority = VALID_PRIORITIES.includes(formData.annualBudgetPriority)
+      ? formData.annualBudgetPriority
+      : 'Gəliri daha düzgün bölüşdürmək'
 
-    // 2. Smooth UI phase transition timer (e.g., move to phase 2 after 2.5s)
-    const phaseTimer = window.setTimeout(() => setLoadingPhase(2), 2500)
+    const payload = {
+      annualBudgetPriority,
+      monthlySavingsAbility: String(formData.monthlySavingsAbility || '')
+    }
+
+    setLoadingPhase(1)
+    window.setTimeout(() => setLoadingPhase(2), 1500)
 
     try {
-      const token = localStorage.getItem('access_token') || localStorage.getItem('token')
+      const token = localStorage.getItem('access_token') || localStorage.getItem('token') || localStorage.getItem('accessToken')
 
-      // 3. Fire the API request ONCE right here
       const response = await axios.post(
-        'http://127.0.0.1:8000/api/financial-inquiry/complete/', 
+        'http://127.0.0.1:8000/api/financial-inquiry/complete/',
         payload,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        }
+        { headers: { 'Authorization': `Bearer ${token}` } }
       )
 
       const sessionId = response.data.session_id || response.data.sessionId
 
       if (sessionId) {
-        window.clearTimeout(phaseTimer)
         onboarding.finishOnboarding()
         navigate(`/summary/${sessionId}`)
       } else {
-        console.error("Session ID tapılmadı:", response.data)
+        console.error('Session ID tapılmadı:', response.data)
         setLoadingPhase(null)
+        setSubmitError('Server cavabı düzgün deyil. Yenidən cəhd edin.')
+        setIsSubmitting(false)
       }
     } catch (err) {
-      console.error("Məlumatı göndərərkən xəta baş verdi:", err)
-      window.clearTimeout(phaseTimer)
+      const errBody = err.response?.data
+      const errMsg = errBody?.error || 'Xəta baş verdi. Yenidən cəhd edin.'
+      console.error('POST /complete/ failed:', err.response?.status, errBody)
       setLoadingPhase(null)
+      setSubmitError(errMsg)
+      setIsSubmitting(false)
     }
   }
 
@@ -61,11 +87,19 @@ export function OnboardingLayout({ userName = 'User' }) {
       <Header />
       <main className={`onboarding-main-container${loadingPhase !== null ? ' loading-main-container' : ''}`}>
         {loadingPhase === null ? (
-          <QuestionCard
-            onboarding={onboarding}
-            submittedFormData={null}
-            onComplete={handleComplete}
-          />
+          <>
+            {submitError && (
+              <div role="alert" style={{ color: '#ef4444', textAlign: 'center', padding: '0.75rem 1rem', marginBottom: '0.5rem', background: '#fee2e2', borderRadius: '8px', fontSize: '0.9rem' }}>
+                ⚠️ {submitError}
+              </div>
+            )}
+            <QuestionCard
+              onboarding={onboarding}
+              submittedFormData={null}
+              onComplete={handleComplete}
+              isSubmitting={isSubmitting}
+            />
+          </>
         ) : (
           <LoadingPlan phase={loadingPhase} />
         )}
@@ -73,3 +107,4 @@ export function OnboardingLayout({ userName = 'User' }) {
     </div>
   )
 }
+

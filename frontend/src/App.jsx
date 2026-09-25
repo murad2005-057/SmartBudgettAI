@@ -1,15 +1,17 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import axios from 'axios'
+import { useState } from 'react'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { LuShieldCheck } from 'react-icons/lu'
 import { OnboardingLayout } from './components/onboarding/OnboardingLayout'
+import { ProtectedRoute } from './components/ProtectedRoute'
+import { BudgetPlanResults } from './components/onboarding/BudgetPlanResults'
 import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY } from './hooks/useOnboardingForm'
 import { registerUser } from './services/api'
 import './App.css'
+import axiosInstance from './api/axios'
 
 const API_BASE = 'http://127.0.0.1:8000/api'
 
-export function App() {
+function AuthPage() {
   const navigate = useNavigate()
 
   const savedAccount = (() => {
@@ -21,10 +23,6 @@ export function App() {
     }
   })()
 
-  const [showOnboarding, setShowOnboarding] = useState(() =>
-    window.localStorage.getItem(ONBOARDING_ACTIVE_KEY) === 'true'
-  )
-  
   const [formData, setFormData] = useState(savedAccount?.formData || {
     fullName: '',
     email: '',
@@ -40,30 +38,6 @@ export function App() {
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
-
-  // Check backend on mount if localStorage was cleared, to see if user has an active plan session
-  useEffect(() => {
-    const checkServerSession = async () => {
-      const token = localStorage.getItem('access_token') || localStorage.getItem('token')
-      if (!token) return
-
-      try {
-        const response = await axios.get(`${API_BASE}/financial-inquiry/status/`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
-        if (response.data) {
-          window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
-          setShowOnboarding(true)
-        }
-      } catch (err) {
-        // No active backend session found, clear local flags if necessary
-      }
-    }
-
-    if (!showOnboarding) {
-      checkServerSession()
-    }
-  }, [showOnboarding])
 
   // Validation functions
   const isFullNameValid = formData.fullName.trim().length > 0
@@ -118,7 +92,7 @@ export function App() {
       window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
 
       setTimeout(() => {
-        setShowOnboarding(true)
+        navigate('/')
       }, 500)
 
     } catch (err) {
@@ -128,12 +102,21 @@ export function App() {
       if (isEmailTaken) {
         try {
           // Attempt to log in with the existing credentials
-          const loginRes = await axios.post(`${API_BASE}/login/`, {
-            email: formData.email.trim(),
-            password: formData.password
+          // using regular axios/fetch to not trigger global interceptors for login
+          const loginRes = await fetch(`${API_BASE}/login/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: formData.email.trim(),
+              password: formData.password
+            })
           })
+          
+          if (!loginRes.ok) throw new Error('Invalid credentials')
+          
+          const loginData = await loginRes.json()
 
-          const token = loginRes.data.access_token || loginRes.data.token || loginRes.data.access
+          const token = loginData.access_token || loginData.token || loginData.access
           if (token) {
             localStorage.setItem('access_token', token)
           }
@@ -141,17 +124,15 @@ export function App() {
           window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
 
           // 3. Fetch their session status to redirect to their last saved summary table
-          const headers = { Authorization: `Bearer ${token}` }
-          const statusRes = await axios.get(`${API_BASE}/financial-inquiry/status/`, { headers })
+          const statusRes = await axiosInstance.get('/financial-inquiry/status/')
           const sessionId = statusRes.data.session_id || statusRes.data.sessionId
 
           if (sessionId) {
-            navigate(`/results/${sessionId}`)
+            navigate(`/summary/${sessionId}`)
           } else {
-            // Fallback if session ID isn't returned directly
             setIsSubmitted(true)
             window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
-            setTimeout(() => { setShowOnboarding(true) }, 500)
+            setTimeout(() => { navigate('/') }, 500)
           }
 
         } catch (loginErr) {
@@ -168,11 +149,6 @@ export function App() {
   const showFullNameError = (touched.fullName || isSubmitted) && !isFullNameValid
   const showEmailError = (touched.email || isSubmitted) && !isEmailValid
   const showPasswordError = (touched.password || isSubmitted) && !isPasswordValid
-
-  if (showOnboarding) {
-    const displayName = formData.fullName.trim().split(' ')[0] || 'User'
-    return <OnboardingLayout userName={displayName} />
-  }
 
   return (
     <main className="app-layout">
@@ -311,6 +287,36 @@ export function App() {
         </div>
       </section>
     </main>
+  )
+}
+
+function OnboardingWrapper() {
+  const savedAccount = (() => {
+    try {
+      const value = window.localStorage.getItem(ACCOUNT_STORAGE_KEY)
+      return value ? JSON.parse(value) : null
+    } catch {
+      return null
+    }
+  })()
+  const displayName = savedAccount?.formData?.fullName?.trim().split(' ')[0] || 'User'
+  return <OnboardingLayout userName={displayName} />
+}
+
+export function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<AuthPage />} />
+      
+      <Route element={<ProtectedRoute />}>
+        <Route path="/" element={<OnboardingWrapper />} />
+        <Route path="/results/:sessionId" element={<BudgetPlanResults />} />
+        <Route path="/summary/:sessionId" element={<BudgetPlanResults />} />
+      </Route>
+      
+      {/* Fallback to login */}
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
   )
 }
 

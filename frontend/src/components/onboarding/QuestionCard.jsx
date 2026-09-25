@@ -13,7 +13,7 @@ import { StepFinancialAssessment } from './steps/StepFinancialAssessment'
 import { StepMonthlySavingsAbility } from './steps/StepMonthlySavingsAbility'
 import { StepAnnualBudgetPriority } from './steps/StepAnnualBudgetPriority'
 
-export function QuestionCard({ onboarding, submittedFormData, onComplete }) {
+export function QuestionCard({ onboarding, submittedFormData, onComplete, isSubmitting = false }) {
   const {
     currentStep,
     totalSteps,
@@ -178,8 +178,9 @@ export function QuestionCard({ onboarding, submittedFormData, onComplete }) {
             onComplete={currentStep === totalSteps ? () => onComplete(formData) : undefined}
             onPrev={prevStep}
             showBack={currentStep > 1}
-            disableNext={!isCurrentStepValid}
+            disableNext={!isCurrentStepValid || isSubmitting}
             nextLabel={currentStep === totalSteps ? 'Təsdiqlə' : 'Növbəti'}
+            isSubmitting={isSubmitting}
           />
         </div>
       )}
