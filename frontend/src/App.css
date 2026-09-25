@@ -1068,7 +1068,7 @@
 
 /* BUDGET PLAN RESULTS */
 .budget-results {
-  width: min(100%, 1180px);
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -1076,9 +1076,13 @@
   color: #263238;
 }
 
-.results-page-wrapper { background: #EEF1F3; }
-.results-page-wrapper .onboarding-header { background: #CAD2D5; width: 100%; }
+.results-page-wrapper { min-height: 100vh; background: #EEF1F3; }
+.results-page-wrapper .onboarding-header { position: sticky; top: 0; z-index: 50; box-sizing: border-box; padding: 12px 24px; background: #C5CECE; width: 100%; }
 .results-page-wrapper .onboarding-brand-title { color: #263238; }
+.results-main-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; max-width: 1152px; margin: 0 auto; padding: 0 24px; box-sizing: border-box; }
+.results-loading-container, .results-error-container { min-height: calc(100vh - 56px); }
+.results-loading-container .loading-screen-container { width: 100%; }
+.results-error-container { gap: 16px; text-align: center; }
 
 .results-heading,
 .results-section-heading,
@@ -1291,6 +1295,8 @@
 .results-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 @media (max-width: 639px) {
+  .results-page-wrapper .onboarding-header { padding: 12px 20px; }
+  .results-main-container { padding: 0 12px; }
   .budget-results { gap: 22px; padding-top: 0; }
   .results-heading, .results-section-heading, .plan-heading, .results-panel-footer { align-items: flex-start; flex-direction: column; }
   .results-heading .results-action { align-self: stretch; }

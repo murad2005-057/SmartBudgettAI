@@ -81,7 +81,7 @@ function AuthPage() {
 
     try {
       // 1. Try to register a new account first
-      await registerUser({
+      const registration = await registerUser({
         fullName: formData.fullName.trim(),
         email: formData.email.trim(),
         password: formData.password
@@ -91,8 +91,11 @@ function AuthPage() {
       window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
       window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
 
+      const destination = registration.isReturningUser && registration.session_id
+        ? `/summary/${registration.session_id}`
+        : '/'
       setTimeout(() => {
-        navigate('/')
+        navigate(destination)
       }, 500)
 
     } catch (err) {

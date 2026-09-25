@@ -1,8 +1,17 @@
-from groq import Groq
+from groq import Groq, RateLimitError
 import json
+import logging
 from decimal import Decimal
 from django.conf import settings
 from .models import FinancialInquirySession
+
+logger = logging.getLogger(__name__)
+
+
+class AIProviderRateLimitError(Exception):
+    def __init__(self, retry_after=None):
+        self.retry_after = retry_after if retry_after and str(retry_after).isdigit() else None
+        super().__init__('AI provider rate limit reached')
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -13,7 +22,8 @@ class DecimalEncoder(json.JSONEncoder):
 
 
 def generate_ai_budget_plan(session_id):
-    print(f"--- Groq AI Plan Generation Started for Session ID: {session_id} ---")
+    logger.info("AI plan generation started for session %s", session_id)
+    session = None
     try:
         session = FinancialInquirySession.objects.get(id=session_id)
 
@@ -113,10 +123,19 @@ def generate_ai_budget_plan(session_id):
                     {"role": "system", "content": "You are an expert financial advisor for Azerbaijani users. Respond with the final JSON answer directly and immediately — do not show your reasoning process, do not think step by step out loud, just output the JSON object as your entire response."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=20000,
+                max_tokens=4096,
                 temperature=0.3,
                 response_format={"type": "json_object"}
             )
+        except RateLimitError as groq_err:
+            retry_after = groq_err.response.headers.get('retry-after') if groq_err.response else None
+            logger.warning(
+                "Groq rate limit reached for session %s; retry-after=%s",
+                session_id,
+                retry_after,
+                exc_info=True,
+            )
+            raise AIProviderRateLimitError(retry_after=retry_after) from groq_err
         except Exception as groq_err:
             print(f"*** Groq API call failed. Full error: {groq_err} ***")
             if hasattr(groq_err, 'response'):
@@ -241,9 +260,11 @@ def generate_ai_budget_plan(session_id):
         session.save()
         print(f"--- Groq AI Plan Generation Completed for Session ID: {session_id} ---")
 
-    except Exception as e:
-        print(f"*** Groq AI Plan Generation Error: {str(e)} ***")
-        session = FinancialInquirySession.objects.filter(id=session_id).first()
+    except Exception:
+        logger.exception("AI plan generation failed for session %s", session_id)
+        if session is None:
+            session = FinancialInquirySession.objects.filter(id=session_id).first()
         if session:
             session.status = 'failed'
             session.save()
+        raise

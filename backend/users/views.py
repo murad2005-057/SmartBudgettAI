@@ -5,10 +5,11 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from .ai_services import generate_ai_budget_plan
+from .ai_services import AIProviderRateLimitError, generate_ai_budget_plan
 import openpyxl
 from django.http import HttpResponse
 from datetime import datetime
+import logging
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
@@ -25,6 +26,32 @@ from .serializers import (
 )
 from django.contrib.auth import authenticate
 
+logger = logging.getLogger(__name__)
+
+
+def _mark_generation_failed(session, action):
+    if session is None:
+        return
+    try:
+        session.status = 'failed'
+        session.save(update_fields=['status', 'updated_at'])
+    except Exception:
+        logger.exception("Could not mark session %s failed after %s", session.pk, action)
+
+
+def _rate_limited_response(session, action, error):
+    logger.warning("AI provider rate-limited session %s during %s", session.pk, action)
+    _mark_generation_failed(session, action)
+    response = Response(
+        {
+            "error": "AI plan limiti dolub. Zəhmət olmasa bir neçə dəqiqə sonra yenidən cəhd edin.",
+            "retry_after": error.retry_after,
+        },
+        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+    if error.retry_after:
+        response['Retry-After'] = error.retry_after
+    return response
 
 
 
@@ -61,6 +88,7 @@ class RegisterView(generics.CreateAPIView):
                     "refresh": str(refresh),
                 },
                 "sessionStatus": session.status,
+                "session_id": session.id,
                 "isReturningUser": True
             }, status=status.HTTP_200_OK)
 
@@ -84,6 +112,7 @@ class RegisterView(generics.CreateAPIView):
                 "refresh": str(refresh),
             },
             "sessionStatus": session.status,
+            "session_id": session.id,
             "isReturningUser": False
         }, status=status.HTTP_201_CREATED)
 
@@ -346,49 +375,39 @@ class CompleteOnboardingView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print("=== /complete/ INCOMING request.data ===", request.data)
-
         serializer = CompleteOnboardingSerializer(data=request.data)
         if not serializer.is_valid():
-            print("=== SERIALIZER ERRORS ===", serializer.errors)
+            logger.warning("Invalid onboarding completion payload for user %s: %s", request.user.pk, serializer.errors)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
-        print(f"=== SESSION STATE === status={session.status} salary={session.salary}")
-
-        # Auto-reset stuck 'processing' or 'failed' sessions so users can retry
-        # without having to clear their database manually.
-        if session.status in ('processing', 'failed'):
-            print(f"=== Resetting session from '{session.status}' to allow retry ===")
-            session.status = 'pending'
-            session.save()
-
-        if not session.salary or session.salary <= 0:
-            print("=== BLOCKED: salary is missing or 0 ===")
-            return Response(
-                {"error": "Əmək haqqı daxil edilməyib. Zəhmət olmasa Step 1-i yenidən tamamlayın."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        session.annual_budget_priority = serializer.validated_data['annualBudgetPriority']
-        if serializer.validated_data.get('monthlySavingsAbility'):
-            session.monthly_savings_ability = serializer.validated_data['monthlySavingsAbility']
-
-        session.status = 'processing'
-        session.save()
-
+        session = None
         try:
-            generate_ai_budget_plan(session.id)
-        except Exception as e:
-            print(f"=== AI generation failed: {e} ===")
-            session.status = 'failed'
+            session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
+            if not session.salary or session.salary <= 0:
+                return Response(
+                    {"error": "Əmək haqqı daxil edilməyib. Zəhmət olmasa Step 1-i yenidən tamamlayın."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            session.annual_budget_priority = serializer.validated_data['annualBudgetPriority']
+            if serializer.validated_data.get('monthlySavingsAbility'):
+                session.monthly_savings_ability = serializer.validated_data['monthlySavingsAbility']
+            session.status = 'processing'
             session.save()
+
+            generate_ai_budget_plan(session.id)
+            session.refresh_from_db()
+            if session.status != 'completed':
+                raise RuntimeError("AI generation finished without completing the plan")
+        except AIProviderRateLimitError as exc:
+            return _rate_limited_response(session, 'onboarding completion', exc)
+        except Exception:
+            logger.exception("Onboarding completion failed for user %s", request.user.pk)
+            _mark_generation_failed(session, 'onboarding completion')
             return Response(
                 {"error": "AI emalı zamanı xəta baş verdi."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-        session.refresh_from_db()
 
         return Response({
             "success": True,
@@ -416,6 +435,7 @@ class FinancialInquiryStatusView(APIView):
             "success": True,
             "isCompleted": is_completed,
             "status": session.status,
+            "session_id": session.id,
             "message": status_messages.get(session.status, 'Yüklənir...'),
         }, status=status.HTTP_200_OK)
 
@@ -424,19 +444,22 @@ class RetryPlanGenerationView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        session = FinancialInquirySession.objects.filter(user=request.user).first()
+        session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
 
-        if session and session.status == 'failed':
+        if session.status != 'processing' and session.salary and session.salary > 0:
             session.status = 'processing'
             session.save()
 
-            # FIXED: this used to be a no-op TODO while claiming success.
             try:
                 generate_ai_budget_plan(session.id)
                 session.refresh_from_db()
+                if session.status != 'completed':
+                    raise RuntimeError("AI generation finished without completing the plan")
+            except AIProviderRateLimitError as exc:
+                return _rate_limited_response(session, 'plan retry', exc)
             except Exception:
-                session.status = 'failed'
-                session.save()
+                logger.exception("Plan retry failed for user %s, session %s", request.user.pk, session.pk)
+                _mark_generation_failed(session, 'plan retry')
                 return Response({
                     "success": False,
                     "message": "Yenidən cəhd uğursuz oldu."
@@ -444,8 +467,9 @@ class RetryPlanGenerationView(APIView):
 
             return Response({
                 "success": True,
-                "message": "Yenidən emala başlandı.",
-                "status": session.status
+                "message": "Plan yenidən hesablandı.",
+                "status": session.status,
+                "session_id": session.id
             }, status=status.HTTP_200_OK)
 
         return Response({
@@ -498,10 +522,14 @@ class RecalculateBudgetAPIView(APIView):
         # 3. Trigger full AI plan regeneration
         try:
             generate_ai_budget_plan(session.id)
-        except Exception as e:
-            print(f"*** Recalculate Error: {str(e)} ***")
-            session.status = "failed"
-            session.save()
+            session.refresh_from_db()
+            if session.status != 'completed':
+                raise RuntimeError("AI generation finished without completing the plan")
+        except AIProviderRateLimitError as exc:
+            return _rate_limited_response(session, 'budget recalculation', exc)
+        except Exception:
+            logger.exception("Budget recalculation failed for user %s, session %s", request.user.pk, session.pk)
+            _mark_generation_failed(session, 'budget recalculation')
             return Response(
                 {
                     "status": "error",

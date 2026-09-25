@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import {
   Download,
@@ -20,7 +20,9 @@ import {
   TrendingUp
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
-import { ONBOARDING_ACTIVE_KEY, ONBOARDING_STORAGE_KEY, ACCOUNT_STORAGE_KEY } from '../../hooks/useOnboardingForm'
+import { ONBOARDING_ACTIVE_KEY, ONBOARDING_STORAGE_KEY, ACCOUNT_STORAGE_KEY, BUDGET_MONTHS_STORAGE_KEY } from '../../hooks/useOnboardingForm'
+import { Header } from './Header'
+import { LoadingPlan } from './LoadingPlan'
 
 const API_BASE = 'http://127.0.0.1:8000/api'
 
@@ -86,20 +88,37 @@ const getGoalIcon = (goal) => {
   return Target
 }
 export function BudgetPlanResults() {
-  const { sessionId } = useParams()
   const navigate = useNavigate()
 
   const [loading, setLoading] = useState(true)
+  const [loadingPhase, setLoadingPhase] = useState(1)
   const [error, setError] = useState(null)
 
   const [summary, setSummary] = useState(null)
   const [goals, setGoals] = useState([])
   const [months, setMonths] = useState([])
-  const [annualTotals, setAnnualTotals] = useState(null)
   const [comparison, setComparison] = useState([])
 
   const [showAllGoals, setShowAllGoals] = useState(false)
   const [showNewPlanModal, setShowNewPlanModal] = useState(false)
+
+  const loadPlanData = async (headers) => {
+    const [summaryRes, goalsRes, tableRes, comparisonRes] = await Promise.all([
+      axios.get(`${API_BASE}/summary/`, { headers, timeout: 15000 }),
+      axios.get(`${API_BASE}/summary/goals/`, { headers, timeout: 15000 }),
+      axios.get(`${API_BASE}/summary/table/`, { headers, timeout: 15000 }),
+      axios.get(`${API_BASE}/summary/comparison/`, { headers, timeout: 15000 })
+    ])
+
+    if (summaryRes.data.status !== 'success' || tableRes.data.status !== 'success') {
+      throw new Error('Plan məlumatları hələ hazır deyil.')
+    }
+
+    setSummary(summaryRes.data.data)
+    setGoals(goalsRes.data.data || [])
+    setMonths(tableRes.data.monthly_table || [])
+    setComparison(comparisonRes.data.budget_comparison || [])
+  }
 
   const userName = (() => {
     try {
@@ -130,20 +149,8 @@ export function BudgetPlanResults() {
         const status = response.data.status
 
         if (status === 'completed' || status === 'complete') {
-          const [summaryRes, goalsRes, tableRes, comparisonRes] = await Promise.all([
-            axios.get(`${API_BASE}/summary/`, { headers, timeout: 5000 }),
-            axios.get(`${API_BASE}/summary/goals/`, { headers, timeout: 5000 }),
-            axios.get(`${API_BASE}/summary/table/`, { headers, timeout: 5000 }),
-            axios.get(`${API_BASE}/summary/comparison/`, { headers, timeout: 5000 })
-          ])
-
+          await loadPlanData(headers)
           if (!isMounted) return
-
-          setSummary(summaryRes.data.data)
-          setGoals(goalsRes.data.data || [])
-          setMonths(tableRes.data.monthly_table || [])
-          setAnnualTotals(tableRes.data.annual_totals || null)
-          setComparison(comparisonRes.data.budget_comparison || [])
           setLoading(false)
           return
         }
@@ -208,6 +215,7 @@ export function BudgetPlanResults() {
         JSON.stringify({ ...parsed, currentStep: step })
       )
     } catch {
+      window.localStorage.removeItem(ONBOARDING_STORAGE_KEY)
     }
     window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
     navigate('/')
@@ -216,24 +224,49 @@ export function BudgetPlanResults() {
   const handleEdit = () => jumpToStep(1)
 
   const handleRefreshTable = async () => {
+    setError(null)
     setLoading(true)
+    setLoadingPhase(1)
+    const phaseTimer = window.setTimeout(() => setLoadingPhase(2), 1500)
     try {
       const headers = authHeaders()
-      await axios.put(`${API_BASE}/summary/recalculate/`, {}, { headers, timeout: 5000 })
-
-      const tableRes = await axios.get(`${API_BASE}/summary/table/`, { headers, timeout: 5000 })
-      setMonths(tableRes.data.monthly_table || [])
-      setAnnualTotals(tableRes.data.annual_totals || null)
+      await axios.put(`${API_BASE}/summary/recalculate/`, {}, { headers, timeout: 60000 })
+      await loadPlanData(headers)
     } catch (err) {
-      setError('Cədvəli yeniləmək mümkün olmadı.')
+      setError(err.response?.data?.message || err.response?.data?.error || 'Cədvəli yeniləmək mümkün olmadı.')
     } finally {
+      window.clearTimeout(phaseTimer)
+      setLoading(false)
+    }
+  }
+
+  const handleRetry = async () => {
+    setError(null)
+    setLoading(true)
+    setLoadingPhase(1)
+    const phaseTimer = window.setTimeout(() => setLoadingPhase(2), 1500)
+    try {
+      const headers = authHeaders()
+      await axios.post(`${API_BASE}/financial-inquiry/retry/`, {}, { headers, timeout: 60000 })
+      await loadPlanData(headers)
+    } catch (err) {
+      setError(err.response?.data?.message || err.response?.data?.error || 'Planı yenidən yükləmək mümkün olmadı.')
+    } finally {
+      window.clearTimeout(phaseTimer)
       setLoading(false)
     }
   }
 
   const handleNewPlan = () => {
     setShowNewPlanModal(false)
-    jumpToStep(5)
+    ;['access_token', 'accessToken', 'token', 'refresh_token', 'refreshToken'].forEach((key) => {
+      window.localStorage.removeItem(key)
+    })
+    window.localStorage.removeItem(ONBOARDING_STORAGE_KEY)
+    window.localStorage.removeItem(ONBOARDING_ACTIVE_KEY)
+    window.localStorage.removeItem(ACCOUNT_STORAGE_KEY)
+    window.localStorage.removeItem(BUDGET_MONTHS_STORAGE_KEY)
+    navigate('/login', { replace: true })
   }
 
   const exportExcel = () => {
@@ -253,44 +286,36 @@ export function BudgetPlanResults() {
     XLSX.writeFile(workbook, 'smartbudget-plan.xlsx')
   }
 
-  const handleDownloadPDF = () => {
-    window.open(`${API_BASE}/summary/export/pdf/`, '_blank')
-  }
-
-  const handleReset = () => {
-    window.localStorage.removeItem(ONBOARDING_ACTIVE_KEY)
-    navigate('/')
-  }
-
   const visibleGoals = showAllGoals ? goals : goals.slice(0, 3)
 
   if (loading) {
       return (
-        <div className="onboarding-page-wrapper results-page-wrapper">
-          <div className="onboarding-main-container loading-main-container">
-            <div className="question-card-container loading-plan-card">
-              <div className="loading-plan-content">
-                <div className="loading-plan-spinner"></div>
-                <h3 className="loading-plan-title">Plan yenidən hesablanır...</h3>
-                <p className="loading-plan-subtitle">Süni intellekt maliyyə məlumatlarınızı yeniləyir</p>
-              </div>
-            </div>
-          </div>
+        <div className="results-page-wrapper">
+          <Header />
+          <main className="results-main-container results-loading-container">
+            <LoadingPlan phase={loadingPhase} />
+          </main>
         </div>
       )
     }
 
   if (error) {
     return (
-      <div className="step-content summary-content" style={{ textAlign: 'center', padding: '4rem' }}>
-        <p>{error}</p>
-        <button type="button" className="btn-restart" onClick={() => window.location.reload()}>Yenidən cəhd et</button>
+      <div className="results-page-wrapper">
+        <Header />
+        <main className="results-main-container results-error-container">
+          <p role="alert">{error}</p>
+          <button type="button" className="btn-restart" onClick={handleRetry}>Yenidən cəhd et</button>
+        </main>
       </div>
     )
   }
 
   return (
-    <div className="budget-results" id="budget-plan-results">
+    <div className="results-page-wrapper">
+      <Header />
+      <main className="results-main-container">
+      <div className="budget-results" id="budget-plan-results">
       <div className="results-heading">
         <div>
           <h1>{userName}, illik büdcə planınız hazırdır</h1>
@@ -425,7 +450,7 @@ export function BudgetPlanResults() {
         <div className="results-modal-backdrop" role="presentation" onClick={() => setShowNewPlanModal(false)}>
           <div className="results-modal" role="dialog" aria-modal="true" aria-labelledby="new-plan-title" onClick={(event) => event.stopPropagation()}>
             <h2 id="new-plan-title">Yeni plan yaradılsın?</h2>
-            <p>Hazırkı plan saxlanılmayacaq və yeni büdcə hesablaması başlayacaq.</p>
+            <p>Hazırkı plan hesabınızda saxlanılacaq. Başqa hesabla daxil olaraq yeni plan yarada bilərsiniz.</p>
             <div className="results-modal-actions">
               <button type="button" className="results-action" onClick={() => setShowNewPlanModal(false)}>Ləğv et</button>
               <button type="button" className="results-action results-action-primary" onClick={handleNewPlan}>Yeni plana başla</button>
@@ -433,6 +458,8 @@ export function BudgetPlanResults() {
           </div>
         </div>
       )}
+      </div>
+      </main>
     </div>
   )
 }
