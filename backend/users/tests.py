@@ -73,3 +73,20 @@ class FinancialSessionIsolationTests(TestCase):
 		self.assertEqual(response['Retry-After'], '180')
 		self.assertEqual(response.data['retry_after'], '180')
 		self.assertEqual(session.status, 'failed')
+
+	def test_complete_uses_fallback_plan_when_groq_request_fails(self):
+		session = FinancialInquirySession.objects.create(
+			user=self.first_user,
+			salary=Decimal('1200'),
+		)
+		self.client.force_authenticate(user=self.first_user)
+
+		with patch('users.ai_services.Groq', side_effect=TimeoutError('request timed out')):
+			with self.assertLogs('users.ai_services', level='ERROR'):
+				response = self.client.post(reverse('complete-onboarding'), {}, format='json')
+
+		session.refresh_from_db()
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(session.status, 'completed')
+		self.assertEqual(len(session.monthly_table), 12)
+		self.assertEqual(len(session.budget_comparison), 9)

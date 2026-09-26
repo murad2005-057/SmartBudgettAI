@@ -26,7 +26,7 @@ export function FormNavigation({
         {showBack && (
           <button type="button" className="btn-back" onClick={onPrev} disabled={isSubmitting}>
             <LuChevronLeft size={18} />
-            <span>Gəri</span>
+            <span>Geri</span>
           </button>
         )}
       </div>
