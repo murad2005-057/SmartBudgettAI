@@ -13,7 +13,12 @@ SECRET_KEY = 'django-insecure-evrpv9*y^lx!)+yetc53p3znfh%#6ri-h6t)0ykb1al_4g(2f$
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'smart-budgett-ai.vercel.app',
+    '.vercel.app',
+    'localhost',
+    '127.0.0.1',
+]
 
 
 # Application definition
@@ -44,8 +49,10 @@ MIDDLEWARE = [
 
 
 CORS_ALLOWED_ORIGINS = [
+    "https://smart-budgett-ai-aryj.vercel.app",
     "http://localhost:5173",
 ]
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = 'core.urls'
 

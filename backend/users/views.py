@@ -28,6 +28,51 @@ from django.contrib.auth import authenticate
 
 logger = logging.getLogger(__name__)
 
+_BUDGET_CATEGORY_ALIASES = {
+    'market': {'market', 'food', 'qida', 'qida və market'},
+    'restaurant': {'restaurant', 'restoran', 'restoran və kafe'},
+    'transport': {'transport', 'nəqliyyat'},
+    'utilities': {'utilities', 'kommunal', 'kommunal ödənişlər'},
+    'clothing': {'clothing', 'geyim'},
+    'entertainment': {'entertainment', 'əyləncə'},
+    'online_shopping': {'online_shopping', 'onlayn alış-veriş'},
+    'other': {'other', 'digər', 'digər xərclər'},
+    'credit': {'credit', 'kredit', 'kredit və borclar'},
+}
+
+
+def _budget_category_key(category_name):
+    normalized = str(category_name or '').strip().lower()
+    return next(
+        (key for key, aliases in _BUDGET_CATEGORY_ALIASES.items() if normalized in aliases),
+        normalized,
+    )
+
+
+def _normalize_budget_comparison_item(item, monthly_income):
+    normalized = dict(item)
+    category_key = _budget_category_key(normalized.get('category_name'))
+    current_amount = float(normalized.get('current_monthly_amount') or 0)
+    recommended_amount = float(normalized.get('recommended_monthly_amount') or 0)
+
+    normalized['percentage'] = round(recommended_amount / monthly_income * 100, 2) if monthly_income > 0 else 0
+    normalized['annual_amount'] = round(recommended_amount * 12, 2)
+
+    if category_key in {'credit', 'utilities'}:
+        normalized['status'] = 'Prioritet ödəniş'
+        normalized['ai_recommendation'] = 'Ödənişini vaxtında et.'
+    elif recommended_amount == 0:
+        normalized['status'] = 'Qənaətlidir'
+        normalized['ai_recommendation'] = 'Bu sahədə qənaət edirsən.'
+    elif recommended_amount > current_amount:
+        normalized['status'] = 'Yüksək xərc'
+        normalized['ai_recommendation'] = 'Xərc tövsiyə olunan səviyyədən yüksəkdir.'
+    else:
+        normalized['status'] = 'Uyğundur'
+        normalized['ai_recommendation'] = 'Xərcin tövsiyə olunan səviyyədədir.'
+
+    return normalized
+
 
 def _mark_generation_failed(session, action):
     if session is None:
@@ -540,6 +585,28 @@ class RecalculateBudgetAPIView(APIView):
 
         session.refresh_from_db()
 
+        modified_fields = data.get('modifiedFields', {})
+        if not isinstance(modified_fields, dict):
+            modified_fields = {}
+        comparison = session.budget_comparison or []
+        for row in comparison:
+            row_category = _budget_category_key(row.get('category_name'))
+            for field in modified_fields.values():
+                if not isinstance(field, dict) or _budget_category_key(field.get('category_name')) != row_category:
+                    continue
+                try:
+                    row['recommended_monthly_amount'] = max(0, float(field.get('new_value', 0)))
+                except (TypeError, ValueError):
+                    pass
+                break
+
+        monthly_income = float(session.salary or 0) + float(session.extra_income or 0)
+        session.budget_comparison = [
+            _normalize_budget_comparison_item(row, monthly_income)
+            for row in comparison
+        ]
+        session.save(update_fields=['budget_comparison', 'updated_at'])
+
         # 4. Return the FULL updated session data so the frontend tables re-render completely
         serializer = FinancialInquirySessionSerializer(session)
         return Response(
@@ -654,6 +721,7 @@ class FinancialSummaryAPIView(APIView):
             "data": {
                 "recommended_monthly_savings": float(session.recommended_monthly_savings or 0),
                 "recommended_annual_savings": float(session.recommended_annual_savings or 0),
+                "reliable_monthly_income": float(session.salary or 0) + float(session.extra_income or 0),
                 "financial_status": session.financial_status,
                 "financial_status_description": session.financial_status_description,
                 "currency": "AZN"
@@ -757,17 +825,18 @@ class BudgetComparisonAPIView(APIView):
 
         budget_comparison = session.budget_comparison or []
 
+        monthly_income = float(session.salary or 0) + float(session.extra_income or 0)
         formatted_comparison = []
         for item in budget_comparison:
-            formatted_comparison.append({
+            formatted_comparison.append(_normalize_budget_comparison_item({
                 "category_name": item.get("category_name"),
-                "percentage": round(float(item.get('percentage', 0)), 1),
+                "percentage": float(item.get('percentage', 0)),
                 "current_monthly_amount": float(item.get('current_monthly_amount', 0)),
                 "recommended_monthly_amount": float(item.get('recommended_monthly_amount', 0)),
                 "annual_amount": float(item.get('annual_amount', 0)),
                 "status": item.get("status", "Uyğundur"),
                 "ai_recommendation": item.get("ai_recommendation", "")
-            })
+            }, monthly_income))
 
         return Response({
             "status": "success",

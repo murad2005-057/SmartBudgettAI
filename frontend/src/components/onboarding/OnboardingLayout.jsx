@@ -6,6 +6,7 @@ import { QuestionCard } from './QuestionCard'
 import { LoadingPlan } from './LoadingPlan'
 import { BUDGET_MONTHS_STORAGE_KEY, useOnboardingForm } from '../../hooks/useOnboardingForm'
 import { updateSalary } from '../../services/api'
+import { API_BASE_URL } from '../../config'
 
 const VALID_PRIORITIES = [
   'Daha çox qənaət etmək',
@@ -56,7 +57,7 @@ export function OnboardingLayout({ userName = 'User' }) {
       const token = localStorage.getItem('access_token') || localStorage.getItem('token') || localStorage.getItem('accessToken')
 
       const response = await axios.post(
-        'http://127.0.0.1:8000/api/financial-inquiry/complete/',
+        `${API_BASE_URL}/financial-inquiry/complete/`,
         payload,
         { headers: { 'Authorization': `Bearer ${token}` } }
       )
@@ -107,4 +108,4 @@ export function OnboardingLayout({ userName = 'User' }) {
     </div>
   )
 }
-
+

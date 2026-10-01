@@ -106,3 +106,63 @@ class FinancialSessionIsolationTests(TestCase):
 		self.assertEqual(session.status, 'completed')
 		self.assertEqual(len(session.monthly_table), 12)
 		self.assertEqual(len(session.budget_comparison), 9)
+
+	def test_recalculate_applies_modified_recommendations_and_recomputes_comparison(self):
+		session = FinancialInquirySession.objects.create(
+			user=self.first_user,
+			salary=Decimal('2000'),
+			extra_income=Decimal('500'),
+		)
+		self.client.force_authenticate(user=self.first_user)
+
+		def generate_plan(session_id):
+			FinancialInquirySession.objects.filter(pk=session_id).update(
+				status='completed',
+				budget_comparison=[
+					{
+						'category_name': 'restaurant',
+						'current_monthly_amount': 400,
+						'recommended_monthly_amount': 340,
+					},
+					{
+						'category_name': 'utilities',
+						'current_monthly_amount': 300,
+						'recommended_monthly_amount': 300,
+					},
+					{
+						'category_name': 'other',
+						'current_monthly_amount': 100,
+						'recommended_monthly_amount': 80,
+					},
+				],
+			)
+
+		with patch('users.views.generate_ai_budget_plan', side_effect=generate_plan):
+			response = self.client.put(
+				reverse('budget-recalculate'),
+				{
+					'modifiedFields': {
+						'comparison:restaurant': {'category_name': 'restaurant', 'new_value': 1000},
+						'comparison:utilities': {'category_name': 'utilities', 'new_value': 350},
+						'comparison:other': {'category_name': 'other', 'new_value': 0},
+					},
+				},
+				format='json',
+			)
+
+		self.assertEqual(response.status_code, 200)
+		comparison = {
+			row['category_name']: row
+			for row in response.data['data']['budget_comparison']
+		}
+		self.assertEqual(comparison['restaurant']['percentage'], 40.0)
+		self.assertEqual(comparison['restaurant']['annual_amount'], 12000.0)
+		self.assertEqual(comparison['restaurant']['status'], 'Yüksək xərc')
+		self.assertEqual(
+			comparison['restaurant']['ai_recommendation'],
+			'Xərc tövsiyə olunan səviyyədən yüksəkdir.',
+		)
+		self.assertEqual(comparison['utilities']['status'], 'Prioritet ödəniş')
+		self.assertEqual(comparison['utilities']['ai_recommendation'], 'Ödənişini vaxtında et.')
+		self.assertEqual(comparison['other']['status'], 'Qənaətlidir')
+		self.assertEqual(comparison['other']['ai_recommendation'], 'Bu sahədə qənaət edirsən.')

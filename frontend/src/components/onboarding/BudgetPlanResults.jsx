@@ -18,8 +18,7 @@ import { ONBOARDING_ACTIVE_KEY, ONBOARDING_STORAGE_KEY, ACCOUNT_STORAGE_KEY, BUD
 import { Header } from './Header'
 import { LoadingPlan } from './LoadingPlan'
 import { GoalCard } from './GoalCard'
-
-const API_BASE = 'http://127.0.0.1:8000/api'
+import { API_BASE_URL as API_BASE } from '../../config'
 
 const MONTHS = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'İyn', 'İyl', 'Avq', 'Sen', 'Okt', 'Noy', 'Dek']
 
@@ -58,8 +57,73 @@ const CATEGORY_LABELS = {
   credit: 'Kredit və borclar'
 }
 
+const CATEGORY_ALIASES = {
+  market: ['market', 'food', 'qida', 'qida və market'],
+  restaurant: ['restaurant', 'restoran', 'restoran və kafe'],
+  transport: ['transport', 'nəqliyyat'],
+  utilities: ['utilities', 'kommunal', 'kommunal ödənişlər'],
+  clothing: ['clothing', 'geyim'],
+  entertainment: ['entertainment', 'əyləncə'],
+  online_shopping: ['online_shopping', 'onlayn alış-veriş'],
+  other: ['other', 'digər', 'digər xərclər'],
+  credit: ['credit', 'kredit', 'kredit və borclar']
+}
+
+const MODIFIED_FIELDS_STORAGE_KEY = 'budgetModifiedFields'
+
+const readModifiedFields = () => {
+  try {
+    const stored = window.localStorage.getItem(MODIFIED_FIELDS_STORAGE_KEY)
+    const parsed = stored ? JSON.parse(stored) : {}
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
 const numberValue = (value) => Number(value) || 0
 const money = (value) => `${numberValue(value).toLocaleString('az-AZ')} AZN`
+const categoryField = (categoryName) => {
+  const normalized = String(categoryName || '').trim().toLowerCase()
+  return Object.entries(CATEGORY_ALIASES).find(([, aliases]) => aliases.includes(normalized))?.[0] || null
+}
+
+const averageMonthlyValue = (monthlyTable, key) => (
+  monthlyTable.length
+    ? monthlyTable.reduce((total, month) => total + numberValue(month[key]), 0) / monthlyTable.length
+    : 0
+)
+
+const calculateComparisonMetrics = (row, monthlyIncome) => {
+  const categoryName = String(row.category_name || '').trim().toLowerCase()
+  const recommended = numberValue(row.recommended_monthly_amount)
+  const current = numberValue(row.current_monthly_amount)
+  const isPriority = ['credit', 'kredit', 'kredit və borclar', 'utilities', 'kommunal', 'kommunal ödənişlər'].includes(categoryName)
+
+  let status
+  let aiRecommendation
+  if (isPriority) {
+    status = 'Prioritet ödəniş'
+    aiRecommendation = 'Ödənişini vaxtında et.'
+  } else if (recommended === 0) {
+    status = 'Qənaətlidir'
+    aiRecommendation = 'Bu sahədə qənaət edirsən.'
+  } else if (recommended > current) {
+    status = 'Yüksək xərc'
+    aiRecommendation = 'Xərc tövsiyə olunan səviyyədən yüksəkdir.'
+  } else {
+    status = 'Uyğundur'
+    aiRecommendation = 'Xərcin tövsiyə olunan səviyyədədir.'
+  }
+
+  return {
+    ...row,
+    percentage: monthlyIncome > 0 ? Math.round((recommended / monthlyIncome) * 10000) / 100 : 0,
+    annual_amount: Math.round(recommended * 1200) / 100,
+    status,
+    ai_recommendation: aiRecommendation
+  }
+}
 
 const authHeaders = () => {
   const token = localStorage.getItem('access_token') || localStorage.getItem('token')
@@ -86,15 +150,51 @@ export function BudgetPlanResults() {
   const [showAllGoals, setShowAllGoals] = useState(false)
   const [showNewPlanModal, setShowNewPlanModal] = useState(false)
 
-  // Track the last modified category/cell for visual highlighting across refreshes
-  const [lastModifiedField, setLastModifiedField] = useState(() => {
-    try {
-      return window.localStorage.getItem('lastModifiedField') || null
-    } catch {
-      return null
-    }
-  })
+  const [modifiedFields, setModifiedFields] = useState(readModifiedFields)
   const [refreshing, setRefreshing] = useState(false)
+
+  const persistModifiedFields = (next) => {
+    setModifiedFields(next)
+    try {
+      window.localStorage.setItem(MODIFIED_FIELDS_STORAGE_KEY, JSON.stringify(next))
+    } catch {
+      // Keep the in-memory edit even when storage is unavailable.
+    }
+  }
+
+  const mergeModifiedFields = (monthlyTable, budgetComparison, monthlyIncome) => {
+    const fields = readModifiedFields()
+    const mergedMonths = monthlyTable.map((month, monthIndex) => {
+      const updatedMonth = { ...month }
+      Object.values(fields).forEach((field) => {
+        if (field.month_index === monthIndex && typeof field.category_name === 'string' && field.category_name in updatedMonth) {
+          updatedMonth[field.category_name] = field.new_value
+        }
+      })
+      return updatedMonth
+    })
+    const mergedComparison = budgetComparison.map((row) => {
+      const key = categoryField(row.category_name)
+      const amount = key ? averageMonthlyValue(mergedMonths, key) : numberValue(row.recommended_monthly_amount)
+      return calculateComparisonMetrics({ ...row, recommended_monthly_amount: amount }, monthlyIncome)
+    })
+    const normalizedFields = Object.fromEntries(
+      Object.entries(fields).filter(([, field]) => Number.isInteger(field.month_index))
+    )
+    mergedComparison.forEach((row) => {
+      normalizedFields[`comparison:${row.category_name}`] = {
+        category_name: row.category_name,
+        new_value: row.recommended_monthly_amount
+      }
+    })
+    setModifiedFields(normalizedFields)
+    try {
+      window.localStorage.setItem(MODIFIED_FIELDS_STORAGE_KEY, JSON.stringify(normalizedFields))
+    } catch {
+      // Keep the in-memory merge when storage is unavailable.
+    }
+    return { mergedMonths, mergedComparison }
+  }
 
   const loadPlanData = async (headers) => {
     const [summaryRes, goalsRes, tableRes, comparisonRes] = await Promise.all([
@@ -108,10 +208,21 @@ export function BudgetPlanResults() {
       throw new Error('Plan məlumatları hələ hazır deyil.')
     }
 
+    const monthlyTable = tableRes.data.monthly_table || []
+    const monthlyIncome = numberValue(summaryRes.data.data?.reliable_monthly_income) || (
+      monthlyTable.length
+        ? monthlyTable.reduce((total, month) => total + numberValue(month.income), 0) / monthlyTable.length
+        : 0
+    )
+    const { mergedMonths, mergedComparison } = mergeModifiedFields(
+      monthlyTable,
+      comparisonRes.data.budget_comparison || [],
+      monthlyIncome
+    )
     setSummary(summaryRes.data.data)
     setGoals(goalsRes.data.data || [])
-    setMonths(tableRes.data.monthly_table || [])
-    setComparison(comparisonRes.data.budget_comparison || [])
+    setMonths(mergedMonths)
+    setComparison(mergedComparison)
   }
 
   const userName = (() => {
@@ -181,30 +292,51 @@ export function BudgetPlanResults() {
   }, [])
 
   const updateCell = (monthIndex, key, value) => {
-    setLastModifiedField(key)
-    try {
-      window.localStorage.setItem('lastModifiedField', key)
-    } catch {
-      // ignore
-    }
-    setMonths((current) => current.map((month, index) => (
+    const newValue = value === '' ? 0 : numberValue(value)
+    const updatedMonths = months.map((month, index) => (
       index === monthIndex ? { ...month, [key]: value === '' ? 0 : numberValue(value) } : month
-    )))
+    ))
+    const nextModifiedFields = {
+      ...modifiedFields,
+      [`month:${monthIndex}:${key}`]: { category_name: key, month_index: monthIndex, new_value: newValue }
+    }
+    const updatedComparison = comparison.map((row) => {
+      const category = categoryField(row.category_name)
+      if (!category) return row
+      const amount = averageMonthlyValue(updatedMonths, category)
+      nextModifiedFields[`comparison:${row.category_name}`] = { category_name: row.category_name, new_value: amount }
+      return calculateComparisonMetrics({ ...row, recommended_monthly_amount: amount }, monthlyIncome)
+    })
+    persistModifiedFields(nextModifiedFields)
+    setMonths(updatedMonths)
+    setComparison(updatedComparison)
   }
 
   const updateComparisonCell = (index, value) => {
     const row = comparison[index]
-    const key = row?.category_name
-    if (key) {
-      setLastModifiedField(key)
-      try {
-        window.localStorage.setItem('lastModifiedField', key)
-      } catch {
-        // ignore
+    const key = categoryField(row?.category_name)
+    if (!key) return
+
+    const newValue = value === '' ? 0 : numberValue(value)
+    const updatedMonths = months.map((month) => ({ ...month, [key]: newValue }))
+    const nextModifiedFields = { ...modifiedFields }
+    updatedMonths.forEach((month, monthIndex) => {
+      nextModifiedFields[`month:${monthIndex}:${key}`] = {
+        category_name: key,
+        month_index: monthIndex,
+        new_value: newValue
       }
+    })
+    nextModifiedFields[`comparison:${row.category_name}`] = {
+      category_name: row.category_name,
+      new_value: newValue
     }
-    setComparison((current) => current.map((item, i) => (
-      i === index ? { ...item, recommended_monthly_amount: value === '' ? 0 : numberValue(value) } : item
+    persistModifiedFields(nextModifiedFields)
+    setMonths(updatedMonths)
+    setComparison((current) => current.map((item, itemIndex) => (
+      itemIndex === index
+        ? calculateComparisonMetrics({ ...item, recommended_monthly_amount: newValue }, monthlyIncome)
+        : item
     )))
   }
 
@@ -212,6 +344,10 @@ export function BudgetPlanResults() {
     ...result,
     [column.key]: months.reduce((total, month) => total + (column.key === 'balance' ? calculateBalance(month) : numberValue(month[column.key])), 0)
   }), {})
+
+  const monthlyIncome = numberValue(summary?.reliable_monthly_income) || (
+    months.length ? months.reduce((total, month) => total + numberValue(month.income), 0) / months.length : 0
+  )
 
   const monthlySavingsDisplay = summary ? summary.recommended_monthly_savings : (liveTotals.savings || 0) / 12
   const annualSavingsDisplay = summary ? summary.recommended_annual_savings : liveTotals.savings
@@ -238,15 +374,9 @@ export function BudgetPlanResults() {
     setRefreshing(true)
     try {
       const headers = authHeaders()
-      const payload = {}
-      comparison.forEach((row) => {
-        if (row.category_name && row.recommended_monthly_amount !== undefined) {
-          payload[row.category_name] = row.recommended_monthly_amount
-        }
-      })
+      const payload = { modifiedFields, monthly_table: months }
       await axios.put(`${API_BASE}/summary/recalculate/`, payload, { headers, timeout: 60000 })
       await loadPlanData(headers)
-      // lastModifiedField is preserved so the edited section remains highlighted
     } catch (err) {
       setError(err.response?.data?.message || err.response?.data?.error || 'Cədvəli yeniləmək mümkün olmadı.')
     } finally {
@@ -280,6 +410,7 @@ export function BudgetPlanResults() {
     window.localStorage.removeItem(ONBOARDING_ACTIVE_KEY)
     window.localStorage.removeItem(ACCOUNT_STORAGE_KEY)
     window.localStorage.removeItem(BUDGET_MONTHS_STORAGE_KEY)
+    window.localStorage.removeItem(MODIFIED_FIELDS_STORAGE_KEY)
     navigate('/login', { replace: true })
   }
 
@@ -400,9 +531,8 @@ export function BudgetPlanResults() {
               <tr>
                 <th>Ay</th>
                 {TABLE_COLUMNS.map((column) => (
-                  <th key={column.key} className={lastModifiedField === column.key ? 'col-header-last-modified' : ''}>
+                  <th key={column.key}>
                     {column.label}
-                    {lastModifiedField === column.key && <span className="last-modified-dot" title="Son dəyişdirilən kateqoriya" />}
                   </th>
                 ))}
               </tr>
@@ -410,16 +540,14 @@ export function BudgetPlanResults() {
             <tbody>{months.map((month, monthIndex) => <tr key={MONTHS[monthIndex] || monthIndex}>
               <th><span className="month-pill">{month.month_name || MONTHS[monthIndex]}</span></th>
               {TABLE_COLUMNS.map((column) => {
-                const isModified = lastModifiedField === column.key
                 return (
-                  <td key={column.key} className={isModified ? 'cell-last-modified' : ''}>
+                  <td key={column.key}>
                     {column.editable === false
                       ? <strong className={calculateBalance(month) < 0 ? 'negative-value' : ''}>{money(calculateBalance(month))}</strong>
                       : <input
                           aria-label={`${month.month_name} ${column.label}`}
                           type="number"
                           min="0"
-                          className={isModified ? 'input-last-modified' : ''}
                           value={month[column.key] ?? ''}
                           placeholder="0"
                           onChange={(event) => updateCell(monthIndex, column.key, event.target.value)}
@@ -440,12 +568,10 @@ export function BudgetPlanResults() {
           <table className="distribution-table">
             <thead><tr><th>Kateqoriya</th><th>%</th><th>Hazırkı aylıq</th><th>Tövsiyə olunan aylıq</th><th>İllik</th><th>Status</th><th>AI tövsiyəsi</th></tr></thead>
             <tbody>{comparison.map((row, idx) => {
-              const isModified = lastModifiedField === row.category_name
               return (
-                <tr key={idx} className={isModified ? 'row-last-modified' : ''}>
+                <tr key={idx}>
                   <th>
                     <span>{CATEGORY_LABELS[row.category_name] || row.category_name}</span>
-                    {isModified && <span className="last-modified-badge">Son dəyişdirilən</span>}
                   </th>
                   <td>{row.percentage}%</td>
                   <td>{money(row.current_monthly_amount)}</td>
@@ -453,7 +579,7 @@ export function BudgetPlanResults() {
                     <input
                       type="number"
                       min="0"
-                      className={`distribution-input ${isModified ? 'input-last-modified' : ''}`}
+                      className="distribution-input"
                       aria-label={`${CATEGORY_LABELS[row.category_name] || row.category_name} tövsiyə olunan aylıq`}
                       value={row.recommended_monthly_amount ?? ''}
                       onChange={(event) => updateComparisonCell(idx, event.target.value)}
@@ -479,11 +605,6 @@ export function BudgetPlanResults() {
             <RefreshCw size={15} className={refreshing ? 'spin-icon' : ''} />
             <span>{refreshing ? 'Cədvəl yenilənir...' : 'Cədvəli yenilə'}</span>
           </button>
-          {lastModifiedField && (
-            <span className="last-modified-indicator">
-              Son dəyişdirilən kateqoriya: <strong>{CATEGORY_LABELS[lastModifiedField] || lastModifiedField}</strong>
-            </span>
-          )}
         </div>
       </section>
 

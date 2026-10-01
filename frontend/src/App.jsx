@@ -8,8 +8,7 @@ import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY } from './hooks/useOnboardin
 import { registerUser } from './services/api'
 import './App.css'
 import axiosInstance from './api/axios'
-
-const API_BASE = 'http://127.0.0.1:8000/api'
+import { API_BASE_URL as API_BASE } from './config'
 
 function AuthPage() {
   const navigate = useNavigate()
