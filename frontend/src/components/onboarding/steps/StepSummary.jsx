@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { CheckCircle, TrendingUp, DollarSign, PieChart, RefreshCw, Download } from 'lucide-react'
+import { GoalCard } from '../GoalCard'
 import {
   completeOnboarding,
   getInquiryStatus,
@@ -194,20 +195,7 @@ export function StepSummary({ formData, userName, onReset }) {
           <h5 style={{ fontSize: '1rem', fontWeight: '600', color: '#1e293b', marginBottom: '1rem' }}>Yığım məqsədləri</h5>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
             {goals.map((goal, idx) => (
-              <div key={idx} style={{ background: '#fff', padding: '1.25rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <strong style={{ fontSize: '0.95rem', color: '#334155' }}>{goal.goal_name}</strong>
-                  <span style={{ fontSize: '0.75rem', background: '#fff7ed', color: '#c2410c', padding: '2px 8px', borderRadius: '6px', fontWeight: '500' }}>
-                    {goal.priority || 'Orta'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '8px' }}>
-                  {goal.current_amount} / {goal.target_amount}
-                </div>
-                <div style={{ background: '#f1f5f9', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div style={{ background: '#f97316', width: `${Math.min(100, goal.progress_percentage || 0)}%`, height: '100%', borderRadius: '4px' }}></div>
-                </div>
-              </div>
+              <GoalCard key={idx} goal={goal} />
             ))}
           </div>
         </div>

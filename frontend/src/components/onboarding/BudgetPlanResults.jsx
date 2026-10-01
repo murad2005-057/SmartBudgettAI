@@ -3,26 +3,21 @@ import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import {
   Download,
-  Car,
   ChevronRight,
   ChevronUp,
   FilePenLine,
-  GraduationCap,
-  Home,
   LineChart,
   Plus,
   PiggyBank,
-  Plane,
   Printer,
   RefreshCw,
-  ShieldAlert,
-  Target,
   TrendingUp
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { ONBOARDING_ACTIVE_KEY, ONBOARDING_STORAGE_KEY, ACCOUNT_STORAGE_KEY, BUDGET_MONTHS_STORAGE_KEY } from '../../hooks/useOnboardingForm'
 import { Header } from './Header'
 import { LoadingPlan } from './LoadingPlan'
+import { GoalCard } from './GoalCard'
 
 const API_BASE = 'http://127.0.0.1:8000/api'
 
@@ -76,17 +71,6 @@ const calculateBalance = (month) => month.income - (
   month.transport + month.clothing + month.online_shopping + month.credit + month.other + month.savings
 )
 
-const getGoalIcon = (goal) => {
-  const title = (goal.goal_name || '').toLowerCase()
-  if (title.includes('home') || title.includes('ev') || title.includes('mənzil')) return Home
-  if (title.includes('car') || title.includes('avtomobil')) return Car
-  if (title.includes('travel') || title.includes('səyahət') || title.includes('tətil')) return Plane
-  if (title.includes('education') || title.includes('təhsil')) return GraduationCap
-  if (title.includes('emergency') || title.includes('təcili')) return ShieldAlert
-  if (title.includes('business') || title.includes('biznes')) return Target
-  if (title.includes('wedding') || title.includes('toy')) return Target
-  return Target
-}
 export function BudgetPlanResults() {
   const navigate = useNavigate()
 
@@ -101,6 +85,16 @@ export function BudgetPlanResults() {
 
   const [showAllGoals, setShowAllGoals] = useState(false)
   const [showNewPlanModal, setShowNewPlanModal] = useState(false)
+
+  // Track the last modified category/cell for visual highlighting across refreshes
+  const [lastModifiedField, setLastModifiedField] = useState(() => {
+    try {
+      return window.localStorage.getItem('lastModifiedField') || null
+    } catch {
+      return null
+    }
+  })
+  const [refreshing, setRefreshing] = useState(false)
 
   const loadPlanData = async (headers) => {
     const [summaryRes, goalsRes, tableRes, comparisonRes] = await Promise.all([
@@ -187,14 +181,30 @@ export function BudgetPlanResults() {
   }, [])
 
   const updateCell = (monthIndex, key, value) => {
+    setLastModifiedField(key)
+    try {
+      window.localStorage.setItem('lastModifiedField', key)
+    } catch {
+      // ignore
+    }
     setMonths((current) => current.map((month, index) => (
       index === monthIndex ? { ...month, [key]: value === '' ? 0 : numberValue(value) } : month
     )))
   }
 
   const updateComparisonCell = (index, value) => {
-    setComparison((current) => current.map((row, i) => (
-      i === index ? { ...row, recommended_monthly_amount: value === '' ? 0 : numberValue(value) } : row
+    const row = comparison[index]
+    const key = row?.category_name
+    if (key) {
+      setLastModifiedField(key)
+      try {
+        window.localStorage.setItem('lastModifiedField', key)
+      } catch {
+        // ignore
+      }
+    }
+    setComparison((current) => current.map((item, i) => (
+      i === index ? { ...item, recommended_monthly_amount: value === '' ? 0 : numberValue(value) } : item
     )))
   }
 
@@ -225,18 +235,22 @@ export function BudgetPlanResults() {
 
   const handleRefreshTable = async () => {
     setError(null)
-    setLoading(true)
-    setLoadingPhase(1)
-    const phaseTimer = window.setTimeout(() => setLoadingPhase(2), 1500)
+    setRefreshing(true)
     try {
       const headers = authHeaders()
-      await axios.put(`${API_BASE}/summary/recalculate/`, {}, { headers, timeout: 60000 })
+      const payload = {}
+      comparison.forEach((row) => {
+        if (row.category_name && row.recommended_monthly_amount !== undefined) {
+          payload[row.category_name] = row.recommended_monthly_amount
+        }
+      })
+      await axios.put(`${API_BASE}/summary/recalculate/`, payload, { headers, timeout: 60000 })
       await loadPlanData(headers)
+      // lastModifiedField is preserved so the edited section remains highlighted
     } catch (err) {
       setError(err.response?.data?.message || err.response?.data?.error || 'Cədvəli yeniləmək mümkün olmadı.')
     } finally {
-      window.clearTimeout(phaseTimer)
-      setLoading(false)
+      setRefreshing(false)
     }
   }
 
@@ -362,33 +376,9 @@ export function BudgetPlanResults() {
         </div>
         {goals.length > 0 ? (
           <div className="results-goals-grid">
-            {visibleGoals.map((goal, idx) => {
-              const amount = numberValue(goal.current_amount)
-              const target = numberValue(goal.target_amount)
-              const monthlySaving = numberValue(goal.recommended_monthly_saving)
-
-              const projectedAmount = Math.min(target, amount + monthlySaving * 12)
-              const progress = target > 0 ? Math.min(100, Math.round((projectedAmount / target) * 100)) : 0
-
-              const GoalIcon = getGoalIcon(goal)
-              return (
-                <div className="results-goal-card" key={idx}>
-                  <div className="results-goal-title">
-                    <span><GoalIcon size={20} strokeWidth={2} /></span>
-                    {goal.goal_name || 'Yığım məqsədi'}
-                  </div>
-                  <div className="results-progress-track"><span style={{ width: `${progress}%` }} /></div>
-                  <small>
-                    <span>{money(goal.recommended_monthly_saving)}/ay</span>
-                    <span className="results-goal-priority">
-                      <span className="results-goal-priority-dot" aria-hidden="true" />
-                      <span className="results-goal-priority-label">Prioritet:</span>
-                      <span className="results-goal-priority-value">{goal.priority}</span>
-                    </span>
-                  </small>
-                </div>
-              )
-            })}
+            {visibleGoals.map((goal, idx) => (
+              <GoalCard key={idx} goal={goal} />
+            ))}
           </div>
         ) : <div className="results-empty-state">Hələ yığım məqsədi seçilməyib.</div>}
       </section>
@@ -398,20 +388,45 @@ export function BudgetPlanResults() {
           <div><h2>AI tərəfindən hazırlanmış 12 aylıq plan</h2><p>Hər ay üçün xərcləri ayrıca bölür və yığım və qalıq məbləğini hesablayır.</p></div>
           <div className="results-actions">
             <button type="button" className="results-action" onClick={handleEdit}><FilePenLine size={14} /> Cavabı dəyiş</button>
-            <button type="button" className="results-action" onClick={handleRefreshTable}><RefreshCw size={14} /> Cədvəli yenilə</button>
+            <button type="button" className="results-action" onClick={handleRefreshTable} disabled={refreshing}>
+              <RefreshCw size={14} className={refreshing ? 'spin-icon' : ''} /> {refreshing ? 'Yenilənir...' : 'Cədvəli yenilə'}
+            </button>
             <button type="button" className="results-action" onClick={() => setShowNewPlanModal(true)}><Plus size={14} /> Yeni plan əlavə et</button>
           </div>
         </div>
         <div className="results-table-scroll">
           <table className="annual-plan-table">
-            <thead><tr><th>Ay</th>{TABLE_COLUMNS.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead>
+            <thead>
+              <tr>
+                <th>Ay</th>
+                {TABLE_COLUMNS.map((column) => (
+                  <th key={column.key} className={lastModifiedField === column.key ? 'col-header-last-modified' : ''}>
+                    {column.label}
+                    {lastModifiedField === column.key && <span className="last-modified-dot" title="Son dəyişdirilən kateqoriya" />}
+                  </th>
+                ))}
+              </tr>
+            </thead>
             <tbody>{months.map((month, monthIndex) => <tr key={MONTHS[monthIndex] || monthIndex}>
               <th><span className="month-pill">{month.month_name || MONTHS[monthIndex]}</span></th>
-              {TABLE_COLUMNS.map((column) => <td key={column.key}>
-                {column.editable === false
-                  ? <strong className={calculateBalance(month) < 0 ? 'negative-value' : ''}>{money(calculateBalance(month))}</strong>
-                  : <input aria-label={`${month.month_name} ${column.label}`} type="number" min="0" value={month[column.key] ?? ''} placeholder="0" onChange={(event) => updateCell(monthIndex, column.key, event.target.value)} />}
-              </td>)}
+              {TABLE_COLUMNS.map((column) => {
+                const isModified = lastModifiedField === column.key
+                return (
+                  <td key={column.key} className={isModified ? 'cell-last-modified' : ''}>
+                    {column.editable === false
+                      ? <strong className={calculateBalance(month) < 0 ? 'negative-value' : ''}>{money(calculateBalance(month))}</strong>
+                      : <input
+                          aria-label={`${month.month_name} ${column.label}`}
+                          type="number"
+                          min="0"
+                          className={isModified ? 'input-last-modified' : ''}
+                          value={month[column.key] ?? ''}
+                          placeholder="0"
+                          onChange={(event) => updateCell(monthIndex, column.key, event.target.value)}
+                        />}
+                  </td>
+                )
+              })}
             </tr>)}</tbody>
             <tfoot><tr><th>İllik cəmi</th>{TABLE_COLUMNS.map((column) => <th key={column.key} className={column.key === 'balance' && liveTotals.balance < 0 ? 'negative-value' : ''}>{money(liveTotals[column.key])}</th>)}</tr></tfoot>
           </table>
@@ -424,25 +439,51 @@ export function BudgetPlanResults() {
         <div className="results-table-scroll">
           <table className="distribution-table">
             <thead><tr><th>Kateqoriya</th><th>%</th><th>Hazırkı aylıq</th><th>Tövsiyə olunan aylıq</th><th>İllik</th><th>Status</th><th>AI tövsiyəsi</th></tr></thead>
-            <tbody>{comparison.map((row, idx) => <tr key={idx}>
-              <th>{CATEGORY_LABELS[row.category_name] || row.category_name}</th>
-              <td>{row.percentage}%</td>
-              <td>{money(row.current_monthly_amount)}</td>
-              <td>
-                <input
-                  type="number"
-                  min="0"
-                  className="distribution-input"
-                  aria-label={`${CATEGORY_LABELS[row.category_name] || row.category_name} tövsiyə olunan aylıq`}
-                  value={row.recommended_monthly_amount ?? ''}
-                  onChange={(event) => updateComparisonCell(idx, event.target.value)}
-                />
-              </td>
-              <td>{money(row.annual_amount)}</td>
-              <td><span className={`budget-tag ${STATUS_TONE[row.status] || 'good'}`}>{row.status}</span></td>
-              <td>{row.ai_recommendation}</td>
-            </tr>)}</tbody>
+            <tbody>{comparison.map((row, idx) => {
+              const isModified = lastModifiedField === row.category_name
+              return (
+                <tr key={idx} className={isModified ? 'row-last-modified' : ''}>
+                  <th>
+                    <span>{CATEGORY_LABELS[row.category_name] || row.category_name}</span>
+                    {isModified && <span className="last-modified-badge">Son dəyişdirilən</span>}
+                  </th>
+                  <td>{row.percentage}%</td>
+                  <td>{money(row.current_monthly_amount)}</td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      className={`distribution-input ${isModified ? 'input-last-modified' : ''}`}
+                      aria-label={`${CATEGORY_LABELS[row.category_name] || row.category_name} tövsiyə olunan aylıq`}
+                      value={row.recommended_monthly_amount ?? ''}
+                      onChange={(event) => updateComparisonCell(idx, event.target.value)}
+                    />
+                  </td>
+                  <td>{money(row.annual_amount)}</td>
+                  <td><span className={`budget-tag ${STATUS_TONE[row.status] || 'good'}`}>{row.status}</span></td>
+                  <td>{row.ai_recommendation}</td>
+                </tr>
+              )
+            })}</tbody>
           </table>
+        </div>
+
+        {/* Refresh Table Action Bar below the Budget Component */}
+        <div className="refresh-table-bottom-bar">
+          <button
+            type="button"
+            className="btn-refresh-table"
+            onClick={handleRefreshTable}
+            disabled={refreshing}
+          >
+            <RefreshCw size={15} className={refreshing ? 'spin-icon' : ''} />
+            <span>{refreshing ? 'Cədvəl yenilənir...' : 'Cədvəli yenilə'}</span>
+          </button>
+          {lastModifiedField && (
+            <span className="last-modified-indicator">
+              Son dəyişdirilən kateqoriya: <strong>{CATEGORY_LABELS[lastModifiedField] || lastModifiedField}</strong>
+            </span>
+          )}
         </div>
       </section>
 

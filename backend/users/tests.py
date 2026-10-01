@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from .ai_services import AIProviderRateLimitError
+from .ai_services import AIProviderRateLimitError, get_jev_combined_prompt
 from .models import FinancialInquirySession
 
 
@@ -74,7 +74,23 @@ class FinancialSessionIsolationTests(TestCase):
 		self.assertEqual(response.data['retry_after'], '180')
 		self.assertEqual(session.status, 'failed')
 
-	def test_complete_uses_fallback_plan_when_groq_request_fails(self):
+	def test_get_jev_combined_prompt_contains_required_schema_and_rules(self):
+		financial_data = {
+			"salary": 2200,
+			"extra_income": 300,
+			"monthly_expenses": {"market": 420, "utilities": 170},
+		}
+
+		prompt = get_jev_combined_prompt(financial_data, 2500)
+
+		self.assertIn("Total Monthly Income: 2500.0 AZN", prompt)
+		self.assertIn('"recommended_monthly_savings": float', prompt)
+		self.assertIn('"budget_comparison": [', prompt)
+		self.assertIn('SUM(Recommended Monthly Amounts) = Reliable Monthly Income.', prompt)
+		self.assertIn('"financial_status": Exactly one of:', prompt)
+		self.assertIn('market, restaurant, transport, utilities, clothing, entertainment, online_shopping, other, credit', prompt)
+
+	def test_complete_uses_fallback_plan_when_jev_ai_request_fails(self):
 		session = FinancialInquirySession.objects.create(
 			user=self.first_user,
 			salary=Decimal('1200'),

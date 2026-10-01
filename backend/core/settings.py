@@ -142,5 +142,6 @@ SIMPLE_JWT = {
 }
 
 GROQ_API_KEY = "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"
+JEV_AI_API_KEY = GROQ_API_KEY
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
