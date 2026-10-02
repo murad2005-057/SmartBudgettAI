@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -148,7 +149,7 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': True,
 }
 
-GROQ_API_KEY = "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"
-JEV_AI_API_KEY = GROQ_API_KEY
+GROQ_API_KEY = os.getenv('GROQ_API_KEY') or os.getenv('API_KEY', '')
+GROQ_MODEL = os.environ.get('GROQ_MODEL', 'llama-3.1-8b-instant')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

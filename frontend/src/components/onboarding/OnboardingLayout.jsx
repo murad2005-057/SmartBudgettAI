@@ -17,8 +17,8 @@ const VALID_PRIORITIES = [
   'Gələcək üçün pul toplamaq',
 ]
 
-export function OnboardingLayout({ userName = 'User' }) {
-  const onboarding = useOnboardingForm(userName)
+export function OnboardingLayout({ userName = 'User', userEmail = '', initialStep }) {
+  const onboarding = useOnboardingForm(userName, userEmail, initialStep)
   const navigate = useNavigate()
   const [loadingPhase, setLoadingPhase] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)

@@ -1,8 +1,10 @@
 from decimal import Decimal
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import reverse
 from rest_framework.test import APIClient
 
@@ -74,6 +76,76 @@ class FinancialSessionIsolationTests(TestCase):
 		self.assertEqual(response.data['retry_after'], '180')
 		self.assertEqual(session.status, 'failed')
 
+	def test_complete_returns_fallback_plan_when_api_keys_are_missing(self):
+		session = FinancialInquirySession.objects.create(
+			user=self.first_user,
+			salary=Decimal('1200'),
+		)
+		self.client.force_authenticate(user=self.first_user)
+
+		with patch.dict('os.environ', {'API_KEY': ''}), patch('users.ai_services.settings.GROQ_API_KEY', ''):
+			with self.assertLogs('users.ai_services', level='ERROR'):
+				response = self.client.post(reverse('complete-onboarding'), {}, format='json')
+
+		session.refresh_from_db()
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.data['status'], 'completed')
+		self.assertEqual(len(response.data['fallback_plan']['monthly_table']), 12)
+		self.assertEqual(len(response.data['fallback_plan']['budget_comparison']), 9)
+		self.assertEqual(session.status, 'completed')
+
+	def test_complete_uses_api_key_alias_for_groq(self):
+		session = FinancialInquirySession.objects.create(
+			user=self.first_user,
+			salary=Decimal('1200'),
+		)
+		self.client.force_authenticate(user=self.first_user)
+
+		with patch.dict('os.environ', {'API_KEY': 'test-key'}), patch(
+			'users.ai_services.settings.GROQ_API_KEY', ''
+		), patch('users.ai_services.Groq', side_effect=TimeoutError('request timed out')) as groq_client:
+			with self.assertLogs('users.ai_services', level='ERROR'):
+				response = self.client.post(reverse('complete-onboarding'), {}, format='json')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertTrue(response.data['fallback_plan'])
+		groq_client.assert_called_once_with(api_key='test-key', timeout=7.0, max_retries=0)
+
+	def test_retry_rejects_recently_processing_session_with_conflict(self):
+		FinancialInquirySession.objects.create(
+			user=self.first_user,
+			salary=Decimal('1200'),
+			status='processing',
+		)
+		self.client.force_authenticate(user=self.first_user)
+
+		with patch('users.views.generate_ai_budget_plan') as generate_plan:
+			response = self.client.post(reverse('retry-plan'), {}, format='json')
+
+		self.assertEqual(response.status_code, 409)
+		self.assertEqual(response.data['code'], 'PLAN_ALREADY_PROCESSING')
+		generate_plan.assert_not_called()
+
+	def test_retry_recovers_stale_processing_session(self):
+		session = FinancialInquirySession.objects.create(
+			user=self.first_user,
+			salary=Decimal('1200'),
+			status='processing',
+		)
+		FinancialInquirySession.objects.filter(pk=session.pk).update(
+			updated_at=timezone.now() - timedelta(minutes=1),
+		)
+		self.client.force_authenticate(user=self.first_user)
+
+		def complete_plan(session_id):
+			FinancialInquirySession.objects.filter(pk=session_id).update(status='completed')
+
+		with patch('users.views.generate_ai_budget_plan', side_effect=complete_plan):
+			response = self.client.post(reverse('retry-plan'), {}, format='json')
+
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.data['status'], 'completed')
+
 	def test_get_jev_combined_prompt_contains_required_schema_and_rules(self):
 		financial_data = {
 			"salary": 2200,
@@ -97,7 +169,9 @@ class FinancialSessionIsolationTests(TestCase):
 		)
 		self.client.force_authenticate(user=self.first_user)
 
-		with patch('users.ai_services.Groq', side_effect=TimeoutError('request timed out')):
+		with patch('users.ai_services.settings.GROQ_API_KEY', 'test-key'), patch(
+			'users.ai_services.Groq', side_effect=TimeoutError('request timed out')
+		):
 			with self.assertLogs('users.ai_services', level='ERROR'):
 				response = self.client.post(reverse('complete-onboarding'), {}, format='json')
 

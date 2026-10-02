@@ -8,7 +8,8 @@ from rest_framework.views import APIView
 from .ai_services import AIProviderRateLimitError, generate_ai_budget_plan
 import openpyxl
 from django.http import HttpResponse
-from datetime import datetime
+from datetime import datetime, timedelta
+from django.utils import timezone
 import logging
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -97,7 +98,6 @@ def _rate_limited_response(session, action, error):
     if error.retry_after:
         response['Retry-After'] = error.retry_after
     return response
-
 
 
 class RegisterView(generics.CreateAPIView):
@@ -440,7 +440,7 @@ class CompleteOnboardingView(APIView):
             session.status = 'processing'
             session.save()
 
-            generate_ai_budget_plan(session.id)
+            generation_result = generate_ai_budget_plan(session.id)
             session.refresh_from_db()
             if session.status != 'completed':
                 raise RuntimeError("AI generation finished without completing the plan")
@@ -450,16 +450,22 @@ class CompleteOnboardingView(APIView):
             logger.exception("Onboarding completion failed for user %s", request.user.pk)
             _mark_generation_failed(session, 'onboarding completion')
             return Response(
-                {"error": "AI emalı zamanı xəta baş verdi."},
+                {
+                    "error": "AI emalı zamanı xəta baş verdi.",
+                    "code": "AI_PLAN_GENERATION_FAILED",
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-        return Response({
+        response_data = {
             "success": True,
             "message": "Sorğu emal edildi və plan hazırdır.",
             "status": session.status,
-            "session_id": session.id
-        }, status=status.HTTP_200_OK)
+            "session_id": session.id,
+        }
+        if generation_result and generation_result.get("used_fallback"):
+            response_data["fallback_plan"] = generation_result.get("plan")
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class FinancialInquiryStatusView(APIView):
@@ -490,37 +496,56 @@ class RetryPlanGenerationView(APIView):
 
     def post(self, request):
         session, _ = FinancialInquirySession.objects.get_or_create(user=request.user)
-
-        if session.status != 'processing' and session.salary and session.salary > 0:
-            session.status = 'processing'
-            session.save()
-
-            try:
-                generate_ai_budget_plan(session.id)
-                session.refresh_from_db()
-                if session.status != 'completed':
-                    raise RuntimeError("AI generation finished without completing the plan")
-            except AIProviderRateLimitError as exc:
-                return _rate_limited_response(session, 'plan retry', exc)
-            except Exception:
-                logger.exception("Plan retry failed for user %s, session %s", request.user.pk, session.pk)
-                _mark_generation_failed(session, 'plan retry')
-                return Response({
-                    "success": False,
-                    "message": "Yenidən cəhd uğursuz oldu."
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+        if not session.salary or session.salary <= 0:
             return Response({
-                "success": True,
-                "message": "Plan yenidən hesablandı.",
-                "status": session.status,
-                "session_id": session.id
-            }, status=status.HTTP_200_OK)
+                "success": False,
+                "message": "Yenidən cəhd üçün əvvəlcə əmək haqqınızı daxil edin.",
+                "code": "SALARY_REQUIRED",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+        stale_before = now - timedelta(seconds=20)
+        if session.status == 'processing' and session.updated_at >= stale_before:
+            return Response({
+                "success": False,
+                "message": "Plan hazırda hazırlanır. Zəhmət olmasa gözləyin.",
+                "code": "PLAN_ALREADY_PROCESSING",
+            }, status=status.HTTP_409_CONFLICT)
+
+        claimed = FinancialInquirySession.objects.filter(
+            pk=session.pk,
+            status=session.status,
+            updated_at=session.updated_at,
+        ).update(status='processing', updated_at=now)
+        if not claimed:
+            return Response({
+                "success": False,
+                "message": "Plan hazırda hazırlanır. Zəhmət olmasa gözləyin.",
+                "code": "PLAN_ALREADY_PROCESSING",
+            }, status=status.HTTP_409_CONFLICT)
+
+        try:
+            generate_ai_budget_plan(session.id)
+            session.refresh_from_db()
+            if session.status != 'completed':
+                raise RuntimeError("AI generation finished without completing the plan")
+        except AIProviderRateLimitError as exc:
+            return _rate_limited_response(session, 'plan retry', exc)
+        except Exception:
+            logger.exception("Plan retry failed for user %s, session %s", request.user.pk, session.pk)
+            _mark_generation_failed(session, 'plan retry')
+            return Response({
+                "success": False,
+                "message": "Yenidən cəhd uğursuz oldu.",
+                "code": "AI_PLAN_GENERATION_FAILED",
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({
-            "success": False,
-            "message": "Yenidən cəhd etmək mümkün deyil."
-        }, status=status.HTTP_400_BAD_REQUEST)
+            "success": True,
+            "message": "Plan yenidən hesablandı.",
+            "status": session.status,
+            "session_id": session.id
+        }, status=status.HTTP_200_OK)
 
 
 
@@ -579,6 +604,7 @@ class RecalculateBudgetAPIView(APIView):
                 {
                     "status": "error",
                     "message": "Yenidən hesablama zamanı xəta baş verdi.",
+                    "code": "AI_PLAN_GENERATION_FAILED",
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

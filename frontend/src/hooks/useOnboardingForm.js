@@ -4,6 +4,19 @@ export const ONBOARDING_ACTIVE_KEY = 'smartbudget-onboarding-active'
 export const ACCOUNT_STORAGE_KEY = 'smartbudget-account-state'
 export const BUDGET_MONTHS_STORAGE_KEY = 'smartbudget-budget-plan-months'
 
+export function clearSavedOnboardingProgress() {
+  const keys = [
+    ONBOARDING_STORAGE_KEY,
+    ONBOARDING_ACTIVE_KEY,
+    BUDGET_MONTHS_STORAGE_KEY,
+    'onboardingStep',
+    'currentStep'
+  ]
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    keys.forEach((key) => storage.removeItem(key))
+  }
+}
+
 import { 
   updateSalary, 
   updateExtraIncome, 
@@ -60,18 +73,36 @@ const createInitialFormData = () => ({
   financialGoal: ''
 })
 
-const getSavedState = () => {
+const getSavedState = (userEmail) => {
+  if (!userEmail) return null
+
   try {
     const savedState = window.localStorage.getItem(ONBOARDING_STORAGE_KEY)
-    return savedState ? JSON.parse(savedState) : null
+    if (!savedState) return null
+
+    const parsedState = JSON.parse(savedState)
+    const savedStep = Number(parsedState.currentStep)
+    const savedEmail = String(parsedState.userEmail || '').trim().toLowerCase()
+    if (savedEmail !== userEmail || !Number.isInteger(savedStep) || savedStep < 1 || savedStep > 10) {
+      return null
+    }
+
+    return parsedState
   } catch {
     return null
   }
 }
 
-export function useOnboardingForm(initialUserName = 'User') {
-  const savedState = getSavedState()
-  const [currentStep, setCurrentStep] = useState(savedState?.currentStep || 1)
+export function useOnboardingForm(initialUserName = 'User', userEmail = '', initialStep) {
+  const normalizedUserEmail = String(userEmail).trim().toLowerCase()
+  const savedState = getSavedState(normalizedUserEmail)
+  const [currentStep, setCurrentStep] = useState(() => {
+    const requestedStep = Number(initialStep)
+    if (Number.isInteger(requestedStep) && requestedStep >= 1 && requestedStep <= 10) {
+      return requestedStep
+    }
+    return savedState?.currentStep || 1
+  })
   const [userName] = useState(initialUserName)
   const [stepError, setStepError] = useState(null)
   const [formData, setFormData] = useState(() => ({
@@ -86,8 +117,12 @@ export function useOnboardingForm(initialUserName = 'User') {
   const totalSteps = 10
 
   useEffect(() => {
-    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, JSON.stringify({ currentStep, formData }))
-  }, [currentStep, formData])
+    if (!normalizedUserEmail) return
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({ currentStep, formData, userEmail: normalizedUserEmail })
+    )
+  }, [currentStep, formData, normalizedUserEmail])
 
   const finishOnboarding = () => {
     window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')

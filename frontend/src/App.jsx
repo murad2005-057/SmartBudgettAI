@@ -1,13 +1,12 @@
-import { useState } from 'react'
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { LuShieldCheck } from 'react-icons/lu'
 import { OnboardingLayout } from './components/onboarding/OnboardingLayout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { BudgetPlanResults } from './components/onboarding/BudgetPlanResults'
-import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY } from './hooks/useOnboardingForm'
+import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY, clearSavedOnboardingProgress } from './hooks/useOnboardingForm'
 import { registerUser } from './services/api'
 import './App.css'
-import axiosInstance from './api/axios'
 import { API_BASE_URL as API_BASE } from './config'
 
 function AuthPage() {
@@ -86,15 +85,15 @@ function AuthPage() {
         password: formData.password
       })
 
+      if (!registration.isReturningUser) {
+        clearSavedOnboardingProgress()
+      }
       setIsSubmitted(true)
       window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
       window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
 
-      const destination = registration.isReturningUser && registration.session_id
-        ? `/summary/${registration.session_id}`
-        : '/'
       setTimeout(() => {
-        navigate(destination)
+        navigate('/onboarding', { replace: true, state: { startAtStep: 1 } })
       }, 500)
 
     } catch (err) {
@@ -124,18 +123,9 @@ function AuthPage() {
           }
 
           window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
-
-          // 3. Fetch their session status to redirect to their last saved summary table
-          const statusRes = await axiosInstance.get('/financial-inquiry/status/')
-          const sessionId = statusRes.data.session_id || statusRes.data.sessionId
-
-          if (sessionId) {
-            navigate(`/summary/${sessionId}`)
-          } else {
-            setIsSubmitted(true)
-            window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
-            setTimeout(() => { navigate('/') }, 500)
-          }
+          setIsSubmitted(true)
+          window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
+          navigate('/onboarding', { replace: true, state: { startAtStep: 1 } })
 
         } catch (loginErr) {
           setApiError('Bu e-poçt artıq qeydiyyatdadır, lakin daxil etdiyiniz şifrə yanlışdır.')
@@ -293,6 +283,16 @@ function AuthPage() {
 }
 
 function OnboardingWrapper() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const initialStep = location.state?.startAtStep
+
+  useEffect(() => {
+    if (initialStep) {
+      navigate(location.pathname, { replace: true, state: null })
+    }
+  }, [initialStep, location.pathname, navigate])
+
   const savedAccount = (() => {
     try {
       const value = window.localStorage.getItem(ACCOUNT_STORAGE_KEY)
@@ -302,7 +302,8 @@ function OnboardingWrapper() {
     }
   })()
   const displayName = savedAccount?.formData?.fullName?.trim().split(' ')[0] || 'User'
-  return <OnboardingLayout userName={displayName} />
+  const userEmail = savedAccount?.formData?.email || ''
+  return <OnboardingLayout userName={displayName} userEmail={userEmail} initialStep={initialStep} />
 }
 
 export function App() {
@@ -312,6 +313,7 @@ export function App() {
       
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<OnboardingWrapper />} />
+        <Route path="/onboarding" element={<OnboardingWrapper />} />
         <Route path="/results/:sessionId" element={<BudgetPlanResults />} />
         <Route path="/summary/:sessionId" element={<BudgetPlanResults />} />
       </Route>

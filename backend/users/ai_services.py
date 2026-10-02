@@ -1,4 +1,5 @@
 from typing import Any, Dict, List
+import os
 
 from groq import Groq, RateLimitError
 import json
@@ -600,7 +601,7 @@ def run_jev_budget_pipeline(user_data: Dict[str, Any], total_income: float, llm_
             if hasattr(llm_client, "chat") and hasattr(llm_client.chat, "completions"):
                 try:
                     completion = llm_client.chat.completions.create(
-                        model="openai/gpt-oss-20b",
+                        model=getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant'),
                         messages=[
                             {"role": "user", "content": prompt},
                         ],
@@ -772,6 +773,65 @@ def get_fallback_budget_plan(session):
     }
 
 
+def _persist_fallback_budget_plan(session):
+    fallback = get_fallback_budget_plan(session)
+    monthly_table = [
+        {
+            "month_name": row["month"],
+            "income": row["income"],
+            "market": row["food"],
+            "restaurant": row["restaurant"],
+            "transport": row["transport"],
+            "utilities": row["utilities"],
+            "clothing": row["clothing"],
+            "entertainment": row["entertainment"],
+            "online_shopping": row["online_shopping"],
+            "other": row["other"],
+            "credit": row["credit"],
+            "savings": row["savings"],
+            "balance": row["balance"],
+        }
+        for row in fallback["monthly_plan"]
+    ]
+    budget_comparison = [
+        {
+            "category_name": row["category"],
+            "percentage": row["percentage"],
+            "current_monthly_amount": row["current_monthly"],
+            "recommended_monthly_amount": row["recommended_monthly"],
+            "annual_amount": row["yearly"],
+            "status": row["status"],
+            "ai_recommendation": row["recommendation"],
+        }
+        for row in fallback["budget_breakdown"]
+    ]
+    session.recommended_monthly_savings = fallback["recommended_monthly_savings"]
+    session.recommended_annual_savings = fallback["recommended_annual_savings"]
+    session.financial_status = fallback["financial_status"]
+    session.financial_status_description = fallback["financial_status_description"]
+    session.ai_response_text = fallback["monthly_budget_plan"]
+    session.savings_goals_breakdown = fallback["savings_goals_breakdown"]
+    session.monthly_table = monthly_table
+    session.annual_totals = fallback["annual_totals"]
+    session.budget_comparison = budget_comparison
+    session.status = "completed"
+    session.save()
+    return {
+        "used_fallback": True,
+        "plan": {
+            "recommended_monthly_savings": fallback["recommended_monthly_savings"],
+            "recommended_annual_savings": fallback["recommended_annual_savings"],
+            "financial_status": fallback["financial_status"],
+            "financial_status_description": fallback["financial_status_description"],
+            "monthly_budget_plan": fallback["monthly_budget_plan"],
+            "savings_goals_breakdown": fallback["savings_goals_breakdown"],
+            "monthly_table": monthly_table,
+            "annual_totals": fallback["annual_totals"],
+            "budget_comparison": budget_comparison,
+        },
+    }
+
+
 def generate_ai_budget_plan(session_id):
     logger.info("AI plan generation started for session %s", session_id)
     session = None
@@ -817,14 +877,15 @@ def generate_ai_budget_plan(session_id):
 
         prompt = get_jev_combined_prompt(user_financial_data, total_monthly_income, DecimalEncoder=DecimalEncoder)
 
-        api_key = getattr(settings, 'JEV_AI_API_KEY', None) or getattr(settings, 'GROQ_API_KEY', None)
+        api_key = getattr(settings, 'GROQ_API_KEY', None) or os.getenv('API_KEY')
+        used_fallback = False
         try:
             if not api_key:
-                raise ValueError("JEV_AI_API_KEY və ya GROQ_API_KEY settings.py faylında tapılmadı.")
+                raise ValueError('Set GROQ_API_KEY or API_KEY in the deployment environment.')
 
-            client = Groq(api_key=api_key)
+            client = Groq(api_key=api_key, timeout=7.0, max_retries=0)
             completion = client.chat.completions.create(
-                model="openai/gpt-oss-20b",
+                model=getattr(settings, 'GROQ_MODEL', 'llama-3.1-8b-instant'),
                 messages=[
                     {"role": "system", "content": "You are Jev AI, an expert AI financial budget optimization engine for Azerbaijani users. Respond with the final JSON answer directly and immediately — do not show your reasoning process, do not think step by step out loud, just output the JSON object as your entire response."},
                     {"role": "user", "content": prompt}
@@ -834,17 +895,17 @@ def generate_ai_budget_plan(session_id):
                 response_format={"type": "json_object"}
             )
         except RateLimitError as groq_err:
-            retry_after = groq_err.response.headers.get('retry-after') if groq_err.response else None
             logger.warning(
-                "Jev AI provider rate limit reached for session %s; retry-after=%s",
+                "Jev AI provider rate-limited session %s; using fallback plan",
                 session_id,
-                retry_after,
                 exc_info=True,
             )
-            raise AIProviderRateLimitError(retry_after=retry_after) from groq_err
+            ai_raw_text = json.dumps(get_fallback_budget_plan(session), cls=DecimalEncoder, ensure_ascii=False)
+            used_fallback = True
         except Exception as groq_err:
             logger.exception("Jev AI request failed for session %s; using fallback plan", session_id)
             ai_raw_text = json.dumps(get_fallback_budget_plan(session), cls=DecimalEncoder, ensure_ascii=False)
+            used_fallback = True
         else:
             ai_raw_text = completion.choices[0].message.content
             print(f"Finish reason: {completion.choices[0].finish_reason}")
@@ -871,15 +932,12 @@ def generate_ai_budget_plan(session_id):
 
         try:
             ai_data = json.loads(cleaned_text)
-        except json.JSONDecodeError as json_err:
-            print(f"*** JSON parse failed: {json_err} ***")
-            error_pos = json_err.pos
-            start = max(0, error_pos - 200)
-            end = min(len(cleaned_text), error_pos + 200)
-            print(f"--- CONTEXT AROUND ERROR (position {error_pos}) ---")
-            print(cleaned_text[start:end])
-            print("--- END CONTEXT ---")
-            raise
+            if not isinstance(ai_data, dict):
+                raise ValueError("AI response must be a JSON object")
+        except (json.JSONDecodeError, ValueError):
+            logger.exception("Invalid AI response for session %s; using fallback plan", session_id)
+            ai_data = get_fallback_budget_plan(session)
+            used_fallback = True
 
         if "monthly_table" not in ai_data and isinstance(ai_data.get("monthly_plan"), list):
             ai_data["monthly_table"] = [
@@ -992,12 +1050,17 @@ def generate_ai_budget_plan(session_id):
         session.status = 'completed'
         session.save()
         print(f"--- Jev AI Plan Generation Completed for Session ID: {session_id} ---")
+        return {"used_fallback": used_fallback, "plan": ai_data}
 
     except Exception:
         logger.exception("AI plan generation failed for session %s", session_id)
         if session is None:
             session = FinancialInquirySession.objects.filter(id=session_id).first()
         if session:
-            session.status = 'failed'
-            session.save()
+            try:
+                return _persist_fallback_budget_plan(session)
+            except Exception:
+                logger.exception("Fallback plan persistence failed for session %s", session_id)
+                session.status = 'failed'
+                session.save()
         raise
