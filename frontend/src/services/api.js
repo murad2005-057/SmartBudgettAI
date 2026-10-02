@@ -28,6 +28,27 @@ function clearTokens() {
   localStorage.removeItem('refresh_token')
 }
 
+function logResponseStatus(response) {
+  console.info(`[API] HTTP ${response.status} ${response.url}`)
+}
+
+async function parseJsonResponse(response) {
+  const contentType = response.headers.get('content-type') || ''
+
+  if (!contentType.toLowerCase().includes('json')) {
+    const message = `API returned ${contentType || 'an unknown content type'} (HTTP ${response.status}) instead of JSON: ${response.url}. Check VITE_API_BASE_URL and the backend route.`
+    console.error(message)
+    throw new Error(message)
+  }
+
+  try {
+    return await response.json()
+  } catch (error) {
+    console.error(`[API] Invalid JSON response (HTTP ${response.status}) from ${response.url}`, error)
+    throw new Error(`API returned invalid JSON (HTTP ${response.status}): ${response.url}`, { cause: error })
+  }
+}
+
 async function refreshAccessToken() {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return false
@@ -39,12 +60,13 @@ async function refreshAccessToken() {
       body: JSON.stringify({ refresh: refreshToken })
     })
 
+    logResponseStatus(response)
     if (!response.ok) {
       clearTokens()
       return false
     }
 
-    const data = await response.json()
+    const data = await parseJsonResponse(response)
     setTokens(data.access, data.refresh)
     return data.access
   } catch {
@@ -63,6 +85,7 @@ export async function fetchWithAuth(url, options = {}) {
   }
 
   let response = await fetch(url, { ...options, headers })
+  logResponseStatus(response)
 
   // Əgər Token expired olubsa (401 Unauthorized)
   if (response.status === 401) {
@@ -71,13 +94,14 @@ export async function fetchWithAuth(url, options = {}) {
     if (newAccessToken) {
       headers['Authorization'] = `Bearer ${newAccessToken}`
       response = await fetch(url, { ...options, headers })
+      logResponseStatus(response)
     } else {
       window.location.href = '/login'
       return
     }
   }
 
-  return response.json()
+  return parseJsonResponse(response)
 }
 
 // --- API EXPORTS ---
@@ -91,19 +115,18 @@ export async function registerUser({ fullName, email, password }) {
       body: JSON.stringify({ fullName, email, password })
     })
   } catch (networkErr) {
-    throw new Error('Serverlə əlaqə qurula bilmədi. Zəhmət olmasa bir az sonra yenidən cəhd edin.')
+    throw new Error(
+      'Serverlə əlaqə qurula bilmədi. Zəhmət olmasa bir az sonra yenidən cəhd edin.',
+      { cause: networkErr }
+    )
   }
 
-  let data
-  try {
-    data = await response.json()
-  } catch (parseErr) {
-    throw new Error('Server xətası baş verdi. Zəhmət olmasa bir az sonra yenidən cəhd edin.')
-  }
+  logResponseStatus(response)
+  const data = await parseJsonResponse(response)
 
   if (!response.ok) {
     const firstError = data.errors ? Object.values(data.errors)[0]?.[0] : null
-    throw new Error(firstError || 'Qeydiyyat uğursuz oldu.')
+    throw new Error(data.error || firstError || 'Qeydiyyat uğursuz oldu.')
   }
 
   if (data.tokens?.access) {
@@ -298,8 +321,9 @@ async function downloadAuthenticatedFile(url, fallbackFilename) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refresh: refreshToken })
         })
+        logResponseStatus(refreshResponse)
         if (!refreshResponse.ok) throw new Error('Sessiya bitib. Zəhmət olmasa yenidən daxil olun.')
-        const data = await refreshResponse.json()
+        const data = await parseJsonResponse(refreshResponse)
         localStorage.setItem('access_token', data.access)
         return data.access
       })()

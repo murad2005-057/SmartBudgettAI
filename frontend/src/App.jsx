@@ -7,7 +7,6 @@ import { BudgetPlanResults } from './components/onboarding/BudgetPlanResults'
 import { ACCOUNT_STORAGE_KEY, ONBOARDING_ACTIVE_KEY, clearSavedOnboardingProgress } from './hooks/useOnboardingForm'
 import { registerUser } from './services/api'
 import './App.css'
-import { API_BASE_URL as API_BASE } from './config'
 
 function AuthPage() {
   const navigate = useNavigate()
@@ -97,42 +96,7 @@ function AuthPage() {
       }, 500)
 
     } catch (err) {
-      // 2. If registration fails because the email is already registered, log in automatically
-      const isEmailTaken = err.response?.status === 400 || (err.message && err.message.toLowerCase().includes('email'))
-
-      if (isEmailTaken) {
-        try {
-          // Attempt to log in with the existing credentials
-          // using regular axios/fetch to not trigger global interceptors for login
-          const loginRes = await fetch(`${API_BASE}/login/`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: formData.email.trim(),
-              password: formData.password
-            })
-          })
-          
-          if (!loginRes.ok) throw new Error('Invalid credentials')
-          
-          const loginData = await loginRes.json()
-
-          const token = loginData.access_token || loginData.token || loginData.access
-          if (token) {
-            localStorage.setItem('access_token', token)
-          }
-
-          window.localStorage.setItem(ACCOUNT_STORAGE_KEY, JSON.stringify({ formData }))
-          setIsSubmitted(true)
-          window.localStorage.setItem(ONBOARDING_ACTIVE_KEY, 'true')
-          navigate('/onboarding', { replace: true, state: { startAtStep: 1 } })
-
-        } catch (loginErr) {
-          setApiError('Bu e-poçt artıq qeydiyyatdadır, lakin daxil etdiyiniz şifrə yanlışdır.')
-        }
-      } else {
-        setApiError(err.message || 'Qeydiyyat zamanı xəta baş verdi.')
-      }
+      setApiError(err.message || 'Qeydiyyat zamanı xəta baş verdi.')
     } finally {
       setIsLoading(false)
     }
