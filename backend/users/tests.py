@@ -3,6 +3,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.db import OperationalError
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
@@ -19,7 +20,10 @@ class FinancialSessionIsolationTests(TestCase):
 		self.second_user = User.objects.create_user(username='second', password='test-password')
 
 	def test_register_returns_json_when_an_unexpected_error_occurs(self):
-		with patch('users.views.User.objects.filter', side_effect=RuntimeError('database unavailable')):
+		with patch(
+			'users.views.User.objects.filter',
+			side_effect=OperationalError('attempt to write a readonly database'),
+		):
 			with self.assertLogs('users.views', level='ERROR'):
 				response = self.client.post(
 					reverse('register'),
@@ -33,7 +37,7 @@ class FinancialSessionIsolationTests(TestCase):
 
 		self.assertEqual(response.status_code, 500)
 		self.assertEqual(response['Content-Type'], 'application/json')
-		self.assertEqual(response.json(), {'error': 'database unavailable'})
+		self.assertEqual(response.json(), {'error': 'attempt to write a readonly database'})
 
 	def test_register_keeps_validation_errors_as_client_errors(self):
 		response = self.client.post(

@@ -1,8 +1,6 @@
 from pathlib import Path
 import os
-from urllib.parse import parse_qs, unquote, urlparse
-
-from django.core.exceptions import ImproperlyConfigured
+import shutil
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -93,36 +91,18 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-database_url = os.environ.get('DATABASE_URL')
-if database_url:
-    parsed_database_url = urlparse(database_url)
-    if parsed_database_url.scheme not in {'postgres', 'postgresql'}:
-        raise ImproperlyConfigured('DATABASE_URL must use the postgres:// or postgresql:// scheme.')
-
-    database_options = {}
-    query_options = parse_qs(parsed_database_url.query)
-    ssl_modes = query_options.get('sslmode')
-    if ssl_modes:
-        database_options['sslmode'] = ssl_modes[-1]
-    elif os.environ.get('VERCEL'):
-        database_options['sslmode'] = 'require'
+if os.environ.get('VERCEL'):
+    db_path = Path('/tmp/db.sqlite3')
+    orig_db = BASE_DIR / 'db.sqlite3'
+    if not db_path.exists() and orig_db.exists():
+        shutil.copyfile(orig_db, db_path)
 
     DATABASES = {
         'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': unquote(parsed_database_url.path.lstrip('/')),
-            'USER': unquote(parsed_database_url.username or ''),
-            'PASSWORD': unquote(parsed_database_url.password or ''),
-            'HOST': parsed_database_url.hostname or '',
-            'PORT': parsed_database_url.port or '',
-            'OPTIONS': database_options,
-            'CONN_MAX_AGE': 0,
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': db_path,
         }
     }
-elif os.environ.get('VERCEL'):
-    raise ImproperlyConfigured(
-        'DATABASE_URL must be set to a persistent PostgreSQL database on Vercel.'
-    )
 else:
     DATABASES = {
         'default': {
