@@ -1,4 +1,3 @@
-import React from 'react'
 import { GoalOptionCard } from './GoalOptionCard'
 import { GoalDetailForm } from './GoalDetailForm'
 

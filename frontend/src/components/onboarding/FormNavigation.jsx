@@ -1,4 +1,3 @@
-import React from 'react'
 import { LuChevronLeft, LuChevronRight } from 'react-icons/lu'
 
 export function FormNavigation({

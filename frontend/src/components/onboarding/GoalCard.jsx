@@ -1,23 +1,4 @@
-import React from 'react'
-import {
-  Car,
-  GraduationCap,
-  Home,
-  Plane,
-  ShieldAlert,
-  Target
-} from 'lucide-react'
-
-export const getGoalIcon = (goal) => {
-  const title = (goal?.goal_name || goal?.custom_name || goal?.goal_id || '').toLowerCase()
-  if (title.includes('home') || title.includes('ev') || title.includes('mənzil')) return Home
-  if (title.includes('car') || title.includes('avtomobil') || title.includes('maşın')) return Car
-  if (title.includes('travel') || title.includes('səyahət') || title.includes('tətil')) return Plane
-  if (title.includes('education') || title.includes('təhsil')) return GraduationCap
-  if (title.includes('emergency') || title.includes('təcili')) return ShieldAlert
-  if (title.includes('business') || title.includes('biznes')) return Target
-  return Target
-}
+import { getGoalIcon } from './goalIcons'
 
 export function GoalCard({ goal }) {
   const amount = Number(goal?.current_amount) || 0
@@ -28,7 +9,6 @@ export function GoalCard({ goal }) {
     ? Math.round(Number(goal.progress_percentage))
     : (target > 0 ? Math.min(100, Math.round((amount / target) * 100)) : 0)
 
-  const IconComponent = getGoalIcon(goal)
   const priority = goal?.priority || 'Orta'
   const goalTitle = goal?.goal_name || goal?.custom_name || goal?.goal_id || 'Yığım məqsədi'
 
@@ -40,7 +20,7 @@ export function GoalCard({ goal }) {
       {/* Top Row: Icon inside light-orange circular background on the left, Goal Name in bold font */}
       <div className="goal-card-top-row">
         <div className="goal-card-icon-wrapper">
-          <IconComponent size={20} strokeWidth={2.2} />
+          {getGoalIcon(goal)}
         </div>
         <h4 className="goal-card-title">{goalTitle}</h4>
       </div>

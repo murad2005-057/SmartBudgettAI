@@ -1,4 +1,3 @@
-import React from 'react'
 import { LuX } from 'react-icons/lu'
 
 export function CustomInput({

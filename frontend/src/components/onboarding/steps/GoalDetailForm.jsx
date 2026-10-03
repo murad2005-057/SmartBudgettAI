@@ -1,4 +1,3 @@
-import React from 'react'
 import { CustomInput } from '../../common/CustomInput'
 
 const PRIORITIES = [
@@ -52,4 +51,3 @@ export function GoalDetailForm({ goal, onPriorityChange, onAmountChange, onAmoun
     </section>
   )
 }
-

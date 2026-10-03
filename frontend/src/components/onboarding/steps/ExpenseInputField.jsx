@@ -1,4 +1,3 @@
-import React from 'react'
 import { CustomInput } from '../../common/CustomInput'
 
 export function ExpenseInputField({ id, icon, label, value, onChange, onClear }) {

@@ -1,5 +1,3 @@
-import React from 'react'
-
 export function ProgressBar({ currentStep, totalSteps }) {
   const percentage = Math.min(100, Math.max(0, (currentStep / totalSteps) * 100))
 

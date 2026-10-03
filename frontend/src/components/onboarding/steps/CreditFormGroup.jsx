@@ -1,5 +1,4 @@
-import React from 'react'
-import { LuX, LuTrash2 } from 'react-icons/lu'
+import { LuTrash2 } from 'react-icons/lu'
 import { CustomInput } from '../../common/CustomInput'
 
 /**

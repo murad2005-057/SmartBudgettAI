@@ -1,5 +1,3 @@
-import React from 'react'
-
 export function ExpenseSelectCard({ icon, label, selected, onClick }) {
   return (
     <button

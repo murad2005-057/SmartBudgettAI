@@ -1,5 +1,3 @@
-import React from 'react'
-
 export function LoadingPlan({ phase }) {
   const subtitle = phase === 1
     ? 'AI planınızı hazırlayır - Məlumatlar analiz edilir...'

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { CheckCircle, TrendingUp, DollarSign, PieChart, RefreshCw, Download } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { CheckCircle, RefreshCw, Download } from 'lucide-react'
 import { GoalCard } from '../GoalCard'
 import {
   completeOnboarding,
@@ -80,7 +80,7 @@ export function StepSummary({ formData, userName, onReset }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [formData?.annualBudgetPriority])
 
   const handleRetry = async () => {
     setPhase('generating')

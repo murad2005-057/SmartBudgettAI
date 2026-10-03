@@ -1,5 +1,3 @@
-import React from 'react'
-
 export function OptionButton({ label, selected, onClick }) {
   return (
     <button

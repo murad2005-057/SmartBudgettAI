@@ -1,4 +1,3 @@
-import React from 'react'
 import { LuUser, LuUsers, LuHouse } from 'react-icons/lu'
 import { HousingOptionCard } from './HousingOptionCard'
 import { CustomInput } from '../../common/CustomInput'

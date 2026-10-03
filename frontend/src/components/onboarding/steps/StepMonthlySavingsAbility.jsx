@@ -1,5 +1,3 @@
-import React from 'react'
-
 const SAVINGS_OPTIONS = [
   { id: 'can_save', label: 'Bəli, müntəzəm' },
   { id: 'sometimes', label: 'Bəzən' },

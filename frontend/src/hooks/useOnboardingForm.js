@@ -27,8 +27,7 @@ import {
   updateMonthlyExpenses, 
   updateRecurringExpenses, 
   updateFinancialAssessment,
-  updateMonthlySavingsAbility,
-  completeOnboarding
+  updateMonthlySavingsAbility
 } from '../services/api'
 
 const EMPTY_CREDIT = () => ({

@@ -1,4 +1,3 @@
-import React from 'react'
 import { ExpenseSelectCard } from './ExpenseSelectCard'
 
 const RECURRING_EXPENSES = [

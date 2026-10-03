@@ -45,7 +45,7 @@ function AuthPage() {
 
   const isPasswordValid =
     formData.password.length >= 8 &&
-    /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?]/.test(formData.password)
+    /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(formData.password)
 
   const isFormValid = isFullNameValid && isEmailValid && isPasswordValid
 

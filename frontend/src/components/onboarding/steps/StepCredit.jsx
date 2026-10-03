@@ -1,4 +1,3 @@
-import React from 'react'
 import { LuPlus } from 'react-icons/lu'
 import { OptionButton } from '../../common/OptionButton'
 import { CreditFormGroup } from './CreditFormGroup'

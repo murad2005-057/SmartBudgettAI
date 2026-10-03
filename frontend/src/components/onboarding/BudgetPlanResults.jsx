@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import {
@@ -162,7 +162,7 @@ export function BudgetPlanResults() {
     }
   }
 
-  const mergeModifiedFields = (monthlyTable, budgetComparison, monthlyIncome) => {
+  const mergeModifiedFields = useCallback((monthlyTable, budgetComparison, monthlyIncome) => {
     const fields = readModifiedFields()
     const mergedMonths = monthlyTable.map((month, monthIndex) => {
       const updatedMonth = { ...month }
@@ -194,9 +194,9 @@ export function BudgetPlanResults() {
       // Keep the in-memory merge when storage is unavailable.
     }
     return { mergedMonths, mergedComparison }
-  }
+  }, [])
 
-  const loadPlanData = async (headers) => {
+  const loadPlanData = useCallback(async (headers) => {
     const [summaryRes, goalsRes, tableRes, comparisonRes] = await Promise.all([
       axios.get(`${API_BASE}/summary/`, { headers, timeout: 15000 }),
       axios.get(`${API_BASE}/summary/goals/`, { headers, timeout: 15000 }),
@@ -223,7 +223,7 @@ export function BudgetPlanResults() {
     setGoals(goalsRes.data.data || [])
     setMonths(mergedMonths)
     setComparison(mergedComparison)
-  }
+  }, [mergeModifiedFields])
 
   const userName = (() => {
     try {
@@ -289,7 +289,7 @@ export function BudgetPlanResults() {
       isMounted = false
       if (timeoutId) clearTimeout(timeoutId)
     }
-  }, [])
+  }, [loadPlanData])
 
   const updateCell = (monthIndex, key, value) => {
     const newValue = value === '' ? 0 : numberValue(value)

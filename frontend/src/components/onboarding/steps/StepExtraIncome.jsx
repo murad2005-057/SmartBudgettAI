@@ -1,4 +1,3 @@
-import React from 'react'
 import { OptionButton } from '../../common/OptionButton'
 import { CustomInput } from '../../common/CustomInput'
 

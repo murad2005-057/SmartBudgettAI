@@ -1,4 +1,3 @@
-import React from 'react'
 import { ProgressBar } from './ProgressBar'
 import { FormNavigation } from './FormNavigation'
 import { StepSalary } from './steps/StepSalary'

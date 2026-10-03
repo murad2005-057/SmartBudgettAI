@@ -1,5 +1,3 @@
-import React from 'react'
-
 /**
  * HousingOptionCard – single-select card for housing type (Step 3).
  * Props:
