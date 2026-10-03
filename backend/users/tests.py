@@ -18,6 +18,32 @@ class FinancialSessionIsolationTests(TestCase):
 		self.first_user = User.objects.create_user(username='first', password='test-password')
 		self.second_user = User.objects.create_user(username='second', password='test-password')
 
+	def test_register_returns_json_when_an_unexpected_error_occurs(self):
+		with patch('users.views.User.objects.filter', side_effect=RuntimeError('database unavailable')):
+			with self.assertLogs('users.views', level='ERROR'):
+				response = self.client.post(
+					reverse('register'),
+					{
+						'fullName': 'Test User',
+						'email': 'test@example.com',
+						'password': 'valid-password!',
+					},
+					format='json',
+				)
+
+		self.assertEqual(response.status_code, 500)
+		self.assertEqual(response['Content-Type'], 'application/json')
+		self.assertEqual(response.json(), {'error': 'database unavailable'})
+
+	def test_register_keeps_validation_errors_as_client_errors(self):
+		response = self.client.post(
+			reverse('register'),
+			{'fullName': '', 'email': 'invalid', 'password': 'short'},
+			format='json',
+		)
+
+		self.assertEqual(response.status_code, 400)
+
 	def test_each_user_reads_their_own_saved_plan(self):
 		FinancialInquirySession.objects.create(
 			user=self.first_user,

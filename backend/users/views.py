@@ -1,13 +1,14 @@
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from rest_framework import generics, status
+from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
 from .ai_services import AIProviderRateLimitError, generate_ai_budget_plan
 import openpyxl
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
 from django.utils import timezone
 import logging
@@ -104,26 +105,51 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
 
     def create(self, request, *args, **kwargs):
-        email = request.data.get('email', '').strip()
-        password = request.data.get('password', '')
+        try:
+            email = request.data.get('email', '').strip()
+            password = request.data.get('password', '')
 
-        existing_user = User.objects.filter(email__iexact=email).first()
+            existing_user = User.objects.filter(email__iexact=email).first()
 
-        if existing_user:
-            user = authenticate(username=existing_user.username, password=password)
+            if existing_user:
+                user = authenticate(username=existing_user.username, password=password)
 
-            if user is None:
-                return Response(
-                    {"error": "Bu e-poçt artıq qeydiyyatdan keçib, şifrə yanlışdır."},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                if user is None:
+                    return Response(
+                        {"error": "Bu e-poçt artıq qeydiyyatdan keçib, şifrə yanlışdır."},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
-            session, _ = FinancialInquirySession.objects.get_or_create(user=user)
+                session, _ = FinancialInquirySession.objects.get_or_create(user=user)
+                refresh = RefreshToken.for_user(user)
+
+                return Response({
+                    "success": True,
+                    "message": "Giriş uğurla tamamlandı.",
+                    "user": {
+                        "fullName": f"{user.first_name} {user.last_name}".strip(),
+                        "email": user.email,
+                    },
+                    "tokens": {
+                        "access": str(refresh.access_token),
+                        "refresh": str(refresh),
+                    },
+                    "sessionStatus": session.status,
+                    "session_id": session.id,
+                    "isReturningUser": True
+                }, status=status.HTTP_200_OK)
+
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            user = serializer.save()
+
+            session = FinancialInquirySession.objects.create(user=user)
+
             refresh = RefreshToken.for_user(user)
 
             return Response({
                 "success": True,
-                "message": "Giriş uğurla tamamlandı.",
+                "message": "Qeydiyyat uğurla tamamlandı.",
                 "user": {
                     "fullName": f"{user.first_name} {user.last_name}".strip(),
                     "email": user.email,
@@ -134,32 +160,13 @@ class RegisterView(generics.CreateAPIView):
                 },
                 "sessionStatus": session.status,
                 "session_id": session.id,
-                "isReturningUser": True
-            }, status=status.HTTP_200_OK)
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-
-        session = FinancialInquirySession.objects.create(user=user)
-
-        refresh = RefreshToken.for_user(user)
-
-        return Response({
-            "success": True,
-            "message": "Qeydiyyat uğurla tamamlandı.",
-            "user": {
-                "fullName": f"{user.first_name} {user.last_name}".strip(),
-                "email": user.email,
-            },
-            "tokens": {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-            },
-            "sessionStatus": session.status,
-            "session_id": session.id,
-            "isReturningUser": False
-        }, status=status.HTTP_201_CREATED)
+                "isReturningUser": False
+            }, status=status.HTTP_201_CREATED)
+        except APIException:
+            raise
+        except Exception as error:
+            logger.exception('Registration failed.')
+            return JsonResponse({'error': str(error)}, status=500)
 
 
 class UpdateSalaryView(APIView):

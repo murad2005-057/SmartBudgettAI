@@ -1,5 +1,8 @@
 from pathlib import Path
 import os
+from urllib.parse import parse_qs, unquote, urlparse
+
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -12,7 +15,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-evrpv9*y^lx!)+yetc53p3znfh%#6ri-h6t)0ykb1al_4g(2f$'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False' if os.environ.get('VERCEL') else 'True').lower() == 'true'
 
 ALLOWED_HOSTS = [
     'smart-budgett-ai.vercel.app',
@@ -50,10 +53,15 @@ MIDDLEWARE = [
 
 
 CORS_ALLOWED_ORIGINS = [
-    "https://smart-budgett-ai-aryj.vercel.app",
     "http://localhost:5173",
 ]
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://([a-z0-9-]+\.)*vercel\.app$",
+]
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.vercel.app",
+]
 
 ROOT_URLCONF = 'core.urls'
 
@@ -85,12 +93,43 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    parsed_database_url = urlparse(database_url)
+    if parsed_database_url.scheme not in {'postgres', 'postgresql'}:
+        raise ImproperlyConfigured('DATABASE_URL must use the postgres:// or postgresql:// scheme.')
+
+    database_options = {}
+    query_options = parse_qs(parsed_database_url.query)
+    ssl_modes = query_options.get('sslmode')
+    if ssl_modes:
+        database_options['sslmode'] = ssl_modes[-1]
+    elif os.environ.get('VERCEL'):
+        database_options['sslmode'] = 'require'
+
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': unquote(parsed_database_url.path.lstrip('/')),
+            'USER': unquote(parsed_database_url.username or ''),
+            'PASSWORD': unquote(parsed_database_url.password or ''),
+            'HOST': parsed_database_url.hostname or '',
+            'PORT': parsed_database_url.port or '',
+            'OPTIONS': database_options,
+            'CONN_MAX_AGE': 0,
+        }
     }
-}
+elif os.environ.get('VERCEL'):
+    raise ImproperlyConfigured(
+        'DATABASE_URL must be set to a persistent PostgreSQL database on Vercel.'
+    )
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
